@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Opus 5.5 Discovers Cricket</title>
+<style>
+  html, body { margin: 0; background: #1c1c1c; height: 100%; display: flex; align-items: center; justify-content: center; }
+  canvas { width: min(96vw, 1600px); height: auto; aspect-ratio: 1920 / 1080; background: #faf6ec; box-shadow: 0 20px 60px rgba(0,0,0,0.5); cursor: pointer; }
+  #hint { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); color: #888; font-family: sans-serif; font-size: 13px; }
+</style>
+</head>
+<body>
+  <canvas id="stage" width="1920" height="1080"></canvas>
+  <audio id="bgm" src="audio.wav" preload="auto"></audio>
+  <div id="hint">click to replay (with sound)</div>
+  <script src="anim.js"></script>
+  <script>
+    let startTime = performance.now();
+    const canvas = document.getElementById('stage');
+    const bgm = document.getElementById('bgm');
+    function replay() {
+      startTime = performance.now();
+      bgm.currentTime = 0;
+      bgm.play().catch(() => {}); // browsers may block autoplay until a click
+    }
+    canvas.addEventListener('click', replay);
+
+    function loop(now) {
+      const t = ((now - startTime) / 1000) % window.DURATION;
+      window.renderFrame(t);
+      requestAnimationFrame(loop);
+    }
+    document.fonts.ready.then(() => { requestAnimationFrame(loop); bgm.play().catch(() => {}); });
+  </script>
+</body>
+</html>
