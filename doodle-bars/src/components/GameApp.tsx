@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import {
   DrawablyButton,
   DrawablyCard,
+  DrawablyCircle,
+  DrawablyHighlight,
   DrawablyInput,
   DrawablySelect,
 } from 'drawably/react'
@@ -13,6 +15,7 @@ import { CLIP_CHOICES, DEFAULT_CLIP_SECONDS } from '@/game/constants'
 import { cleanCode, cleanNickname } from '@/game/names'
 import type { ClientMessage, RoomView } from '@/game/protocol'
 import { ClipPlayer } from './ClipPlayer'
+import { DoodleField, NoteBand } from './Doodles'
 import { useRoom } from './useRoom'
 
 const NICK_KEY = 'doodle-bars-nick'
@@ -22,21 +25,29 @@ export function GameApp() {
   const phase = room.view?.phase ?? 'home'
 
   return (
-    <main className="sheet" data-testid="phase" data-phase={phase}>
-      <p className="eyebrow">name that hook</p>
-      <h1>Doodle Bars</h1>
-      {room.error ? (
-        <p className="error" data-testid="error" role="alert">
-          {room.error}
-        </p>
-      ) : null}
-      {!room.connected && phase === 'home' ? <p className="quiet">Connecting…</p> : null}
-      <Screen
-        view={room.view}
-        send={room.send}
-        leave={room.leave}
-      />
-    </main>
+    <div className="stage">
+      <DoodleField />
+      <main className="sheet" data-testid="phase" data-phase={phase}>
+        <header className="mast">
+          <NoteBand />
+          <p className="eyebrow">name that hook</p>
+          <h1>
+            Doodle <DrawablyHighlight seed={4} fill="#f0a202" stroke="#c47b12">Bars</DrawablyHighlight>
+          </h1>
+        </header>
+        {room.error ? (
+          <p className="error" data-testid="error" role="alert">
+            {room.error}
+          </p>
+        ) : null}
+        {!room.connected && phase === 'home' ? <p className="quiet">Connecting…</p> : null}
+        <Screen
+          view={room.view}
+          send={room.send}
+          leave={room.leave}
+        />
+      </main>
+    </div>
   )
 }
 
@@ -110,56 +121,92 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
 
   return (
     <div className="stack">
-      <p>Hear the opening of a preview. Name the song. No account, just a nickname.</p>
+      <DrawablyCard className="panel panel-lilac" seed={2} stroke="#7b4b94" fill="#7b4b94">
+        <p className="lede">Hear a few seconds. Name the song. No account, just a nickname.</p>
+      </DrawablyCard>
       {localError ? (
         <p className="error" role="alert">
           {localError}
         </p>
       ) : null}
-      <label className="field" htmlFor="nickname">
-        Nickname
-        <DrawablyInput
-          id="nickname"
-          data-testid="nickname"
-          value={nickname}
-          maxLength={16}
-          autoComplete="nickname"
-          onChange={(event) => {
-            remember(event.target.value)
-          }}
-        />
-      </label>
-      <PlaylistField
-        playlistId={playlistId}
-        onChange={setPlaylistId}
-      />
-      <ClipField seconds={clipSeconds} onChange={setClipSeconds} />
-      <div className="row">
-        <DrawablyButton type="button" variant="solid" data-testid="play-solo" onClick={() => create('solo')}>
+      <DrawablyCard className="panel panel-sun" seed={6} stroke="#c47b12" fill="#f0a202">
+        <div className="stack">
+          <label className="field" htmlFor="nickname">
+            Nickname
+            <DrawablyInput
+              id="nickname"
+              data-testid="nickname"
+              value={nickname}
+              maxLength={16}
+              autoComplete="nickname"
+              seed={8}
+              stroke="#c47b12"
+              onChange={(event) => {
+                remember(event.target.value)
+              }}
+            />
+          </label>
+          <PlaylistField playlistId={playlistId} onChange={setPlaylistId} />
+          <ClipField seconds={clipSeconds} onChange={setClipSeconds} />
+        </div>
+      </DrawablyCard>
+      <div className="row actions">
+        <DrawablyButton
+          type="button"
+          variant="solid"
+          data-testid="play-solo"
+          seed={11}
+          fill="#e24b4b"
+          paper="#fffaf5"
+          onClick={() => create('solo')}
+        >
           Play solo
         </DrawablyButton>
-        <DrawablyButton type="button" data-testid="host-room" onClick={() => create('room')}>
+        <DrawablyButton
+          type="button"
+          variant="solid"
+          data-testid="host-room"
+          seed={12}
+          fill="#1f8a70"
+          paper="#fffaf5"
+          onClick={() => create('room')}
+        >
           Host a room
         </DrawablyButton>
       </div>
-      <label className="field" htmlFor="join-code">
-        Room code
-        <DrawablyInput
-          id="join-code"
-          data-testid="join-code"
-          value={code}
-          maxLength={4}
-          autoCapitalize="characters"
-          onChange={(event) => {
-            setCode(event.target.value.toUpperCase())
-          }}
-        />
-      </label>
-      <div>
-        <DrawablyButton type="button" data-testid="join-room" onClick={join}>
-          Join
-        </DrawablyButton>
-      </div>
+      <DrawablyCard className="panel panel-rose" seed={9} stroke="#c44536" fill="#e24b4b">
+        <div className="stack tight">
+          <p className="quiet">Got a code from a friend?</p>
+          <div className="join-row">
+            <label className="field" htmlFor="join-code">
+              Room code
+              <DrawablyInput
+                id="join-code"
+                data-testid="join-code"
+                value={code}
+                maxLength={4}
+                autoCapitalize="characters"
+                seed={10}
+                stroke="#c44536"
+                onChange={(event) => {
+                  setCode(event.target.value.toUpperCase())
+                }}
+              />
+            </label>
+            <DrawablyButton
+              type="button"
+              variant="solid"
+              data-testid="join-room"
+              seed={13}
+              fill="#3a5ccc"
+              paper="#fffaf5"
+              onClick={join}
+            >
+              Join
+            </DrawablyButton>
+          </div>
+        </div>
+      </DrawablyCard>
     </div>
   )
 }
@@ -175,39 +222,46 @@ function Lobby({
 }) {
   return (
     <div className="stack">
-      <DrawablyCard className="card">
+      <DrawablyCard className="panel panel-sun" seed={14} stroke="#c47b12" fill="#f0a202">
         {view.mode === 'room' ? (
           <>
             <p className="quiet">Share this code</p>
             <p className="code" data-testid="room-code">
-              {view.code}
+              <DrawablyCircle seed={15} stroke="#e24b4b">{view.code}</DrawablyCircle>
             </p>
           </>
         ) : (
-          <p>Solo game. Pick a playlist, then start.</p>
+          <p className="lede">Solo game. Pick a playlist, then start.</p>
         )}
       </DrawablyCard>
-      <PlaylistField
-        playlistId={view.playlistId}
-        disabled={!view.you.isHost || view.starting}
-        onChange={(playlistId) => {
-          send({ type: 'configure', playlistId, clipSeconds: view.clipSeconds })
-        }}
-      />
-      <ClipField
-        seconds={view.clipSeconds}
-        disabled={!view.you.isHost || view.starting}
-        onChange={(clipSeconds) => {
-          send({ type: 'configure', playlistId: view.playlistId, clipSeconds })
-        }}
-      />
-      <Scoreboard view={view} />
+      <DrawablyCard className="panel panel-sea" seed={17} stroke="#1f8a70" fill="#1f8a70">
+        <div className="stack">
+          <PlaylistField
+            playlistId={view.playlistId}
+            disabled={!view.you.isHost || view.starting}
+            onChange={(playlistId) => {
+              send({ type: 'configure', playlistId, clipSeconds: view.clipSeconds })
+            }}
+          />
+          <ClipField
+            seconds={view.clipSeconds}
+            disabled={!view.you.isHost || view.starting}
+            onChange={(clipSeconds) => {
+              send({ type: 'configure', playlistId: view.playlistId, clipSeconds })
+            }}
+          />
+          <Scoreboard view={view} />
+        </div>
+      </DrawablyCard>
       <div className="row">
         {view.you.isHost ? (
           <DrawablyButton
             type="button"
             variant="solid"
             data-testid="start-game"
+            seed={16}
+            fill="#e24b4b"
+            paper="#fffaf5"
             state={view.starting ? 'loading' : 'idle'}
             disabled={view.starting}
             onClick={() => {
@@ -246,18 +300,19 @@ function Playing({
 
   return (
     <div className="stack">
-      <p>
-        Round {view.roundNumber} of {view.totalRounds} · {view.playlistName}
-      </p>
-      <p>
-        First {view.clipSeconds} seconds of the preview. iTunes previews often start at the hook,
-        not the first second of the full song.
-      </p>
-      {view.clip ? <ClipPlayer key={view.roundNumber} url={view.clip.previewUrl} seconds={view.clipSeconds} /> : null}
-      <p className="quiet" data-testid="courtesy">
-        Preview courtesy of iTunes.
-      </p>
-      {left !== null ? <p className="quiet">{left}s left to guess</p> : null}
+      <RoundHeading view={view} />
+      <DrawablyCard className="panel panel-sea" seed={18} stroke="#1f8a70" fill="#1f8a70">
+        <div className="stack">
+          {view.clip ? <ClipPlayer key={view.roundNumber} url={view.clip.previewUrl} seconds={view.clipSeconds} /> : null}
+          <p className="quiet">
+            First {view.clipSeconds} seconds. Previews often open on the hook, not second zero of the song.
+          </p>
+          <p className="quiet" data-testid="courtesy">
+            Preview courtesy of iTunes.
+          </p>
+          {left !== null ? <p className="clock">{left}s left to guess</p> : null}
+        </div>
+      </DrawablyCard>
       <form
         className="stack"
         onSubmit={(event) => {
@@ -265,23 +320,36 @@ function Playing({
           submit()
         }}
       >
-        <label className="field" htmlFor="guess">
-          Your guess
-          <DrawablyInput
-            id="guess"
-            data-testid="guess-input"
-            value={guess}
-            maxLength={80}
-            onChange={(event) => {
-              setGuess(event.target.value)
-            }}
-          />
-        </label>
-        <div>
-          <DrawablyButton type="submit" variant="solid" data-testid="guess-submit">
-            Guess
-          </DrawablyButton>
-        </div>
+        <DrawablyCard className="panel panel-rose" seed={19} stroke="#c44536" fill="#e24b4b">
+          <div className="stack">
+            <label className="field" htmlFor="guess">
+              Your guess
+              <DrawablyInput
+                id="guess"
+                data-testid="guess-input"
+                value={guess}
+                maxLength={80}
+                seed={20}
+                stroke="#c44536"
+                onChange={(event) => {
+                  setGuess(event.target.value)
+                }}
+              />
+            </label>
+            <div>
+              <DrawablyButton
+                type="submit"
+                variant="solid"
+                data-testid="guess-submit"
+                seed={21}
+                fill="#e24b4b"
+                paper="#fffaf5"
+              >
+                Guess
+              </DrawablyButton>
+            </div>
+          </div>
+        </DrawablyCard>
       </form>
       <Feedback last={view.lastGuess} />
       <Scoreboard view={view} />
@@ -298,15 +366,15 @@ function Reveal({
 }) {
   return (
     <div className="stack">
-      <p>
-        Round {view.roundNumber} of {view.totalRounds}
-      </p>
+      <RoundHeading view={view} />
       {view.reveal ? (
-        <DrawablyCard className="card">
+        <DrawablyCard className="panel panel-sun" seed={22} stroke="#c47b12" fill="#f0a202">
           <p className="quiet">That was</p>
-          <h2 data-testid="reveal-title">{view.reveal.title}</h2>
+          <h2 data-testid="reveal-title">
+            <DrawablyHighlight seed={23} fill="#f0a202" stroke="#c47b12">{view.reveal.title}</DrawablyHighlight>
+          </h2>
           <p>{view.reveal.artist}</p>
-          <a data-testid="reveal-link" href={view.reveal.storeUrl} target="_blank" rel="noreferrer">
+          <a className="apple-link" data-testid="reveal-link" href={view.reveal.storeUrl} target="_blank" rel="noreferrer">
             Listen on Apple Music
           </a>
         </DrawablyCard>
@@ -321,6 +389,9 @@ function Reveal({
           type="button"
           variant="solid"
           data-testid="next-round"
+          seed={24}
+          fill="#1f8a70"
+          paper="#fffaf5"
           onClick={() => {
             send({ type: 'next' })
           }}
@@ -358,6 +429,9 @@ function Done({
             type="button"
             variant="solid"
             data-testid="play-again"
+            seed={25}
+            fill="#f0a202"
+            paper="#241c16"
             onClick={() => {
               send({ type: 'restart' })
             }}
@@ -393,6 +467,8 @@ function PlaylistField({
         aria-label="Playlist"
         value={playlistId}
         disabled={disabled}
+        seed={31}
+        stroke="#1f8a70"
         onChange={(event) => {
           onChange(event.target.value)
         }}
@@ -428,7 +504,11 @@ function ClipField({
             key={choice}
             type="button"
             data-testid={`clip-${choice}`}
+            seed={30 + choice}
             variant={choice === seconds ? 'solid' : 'outline'}
+            fill={choice === seconds ? '#1f8a70' : undefined}
+            paper={choice === seconds ? '#fffaf5' : undefined}
+            stroke="#1f8a70"
             disabled={disabled}
             aria-pressed={choice === seconds}
             onClick={() => {
@@ -447,12 +527,18 @@ function Feedback({ last }: { last: RoomView['lastGuess'] }) {
   if (!last) return null
   if (last.correct) {
     return (
-      <p data-testid="guess-feedback">
-        That&apos;s it. {last.points} points.
-      </p>
+      <DrawablyCard className="panel panel-leaf" seed={26} stroke="#2f8f4e" fill="#2f8f4e">
+        <p className="feedback" data-testid="guess-feedback">
+          That&apos;s it. {last.points} points.
+        </p>
+      </DrawablyCard>
     )
   }
-  return <p data-testid="guess-feedback">Not quite</p>
+  return (
+    <DrawablyCard className="panel panel-rose" seed={27} stroke="#c44536" fill="#e24b4b">
+      <p className="feedback" data-testid="guess-feedback">Not quite</p>
+    </DrawablyCard>
+  )
 }
 
 function Scoreboard({ view }: { view: RoomView }) {
@@ -461,14 +547,34 @@ function Scoreboard({ view }: { view: RoomView }) {
       {view.players.map((player) => (
         <li
           key={player.id}
+          className={player.id === view.you.id ? 'you' : undefined}
           data-testid={player.id === view.you.id ? 'your-score' : undefined}
         >
+          <span className="swatch" aria-hidden="true" />
           {player.nickname} {player.score}
           {player.solved ? ' · got it' : ''}
           {!player.connected ? ' · away' : ''}
         </li>
       ))}
     </ul>
+  )
+}
+
+function RoundHeading({ view }: { view: RoomView }) {
+  return (
+    <div className="stack tight">
+      <p className="round-line">
+        <span className="round-pill">
+          Round {view.roundNumber} of {view.totalRounds}
+        </span>
+        <span>{view.playlistName}</span>
+      </p>
+      <div className="pips" aria-hidden="true">
+        {Array.from({ length: view.totalRounds }, (_, index) => (
+          <span key={index} className={index < view.roundNumber ? 'on' : undefined} />
+        ))}
+      </div>
+    </div>
   )
 }
 
