@@ -1,7 +1,7 @@
 import { MAX_PLAYERS } from './constants'
 import { clampClipSeconds } from './clip'
-import { matchesAnswer } from './guess'
-import type { GuessFeedback, RoomView } from './protocol'
+import { judgeGuess } from './guess'
+import type { GuessFeedback, RoomView, SharedGuess } from './protocol'
 import { pointsForGuess, roundDurationMs } from './score'
 
 export type RoundSong = {
@@ -11,6 +11,7 @@ export type RoundSong = {
   aliases: string[]
   previewUrl: string
   storeUrl: string
+  artworkUrl: string | null
 }
 
 export type Player = {
@@ -34,6 +35,7 @@ export type Room = {
   roundStartedAt: number | null
   roundEndsAt: number | null
   solvedIds: string[]
+  guesses: SharedGuess[]
   feedback: Record<string, GuessFeedback>
   starting: boolean
 }
@@ -65,6 +67,7 @@ export function createRoom(input: {
     roundStartedAt: null,
     roundEndsAt: null,
     solvedIds: [],
+    guesses: [],
     feedback: {},
     starting: false,
   }
@@ -135,6 +138,7 @@ export function beginGame(
   next.roundIndex = 0
   next.starting = false
   next.solvedIds = []
+  next.guesses = []
   next.feedback = {}
   const duration = roundDurationMs(next.clipSeconds, graceSeconds)
   next.roundStartedAt = now
@@ -154,20 +158,43 @@ export function submitGuess(room: Room, playerId: string, text: string, now: num
   const song = room.songs[room.roundIndex]
   if (!song) return { ok: false, error: 'No song in this round' }
   const next = structuredClone(room)
-  const correct = matchesAnswer(text, song.title, song.aliases)
-  if (!correct) {
-    next.feedback[playerId] = { correct: false, points: 0 }
+  const judgement = judgeGuess(text, song.title, song.aliases)
+  if (judgement === 'close') {
+    next.feedback[playerId] = { correct: false, close: true, points: 0 }
+    next.guesses.push(guessNote(next, player, text, 'close', 0))
+    return { ok: true, room: next }
+  }
+  if (judgement === 'miss') {
+    next.feedback[playerId] = { correct: false, close: false, points: 0 }
+    next.guesses.push(guessNote(next, player, text, 'miss', 0))
     return { ok: true, room: next }
   }
   const started = next.roundStartedAt ?? now
   const ends = next.roundEndsAt ?? now
-  const later = next.solvedIds.length > 0
-  const points = pointsForGuess(now - started, Math.max(1, ends - started), later)
+  const points = pointsForGuess(now - started, Math.max(1, ends - started), false)
   const scorer = next.players.find((item) => item.id === playerId)
   if (scorer) scorer.score += points
   next.solvedIds.push(playerId)
-  next.feedback[playerId] = { correct: true, points }
+  next.feedback[playerId] = { correct: true, close: false, points }
+  next.guesses.push(guessNote(next, player, text, 'correct', points))
   return { ok: true, room: syncPhase(next, now) }
+}
+
+function guessNote(
+  room: Room,
+  player: Player,
+  text: string,
+  kind: SharedGuess['kind'],
+  points: number,
+): SharedGuess {
+  return {
+    id: String(room.guesses.length + 1),
+    playerId: player.id,
+    nickname: player.nickname,
+    text,
+    kind,
+    points,
+  }
 }
 
 export function revealIfDue(room: Room, now: number): Room {
@@ -181,10 +208,7 @@ export function revealIfDue(room: Room, now: number): Room {
 export function syncPhase(room: Room, now: number): Room {
   const timed = revealIfDue(room, now)
   if (timed.phase !== 'playing') return timed
-  const active = timed.players.filter((player) => player.connected)
-  if (active.length === 0) return timed
-  const allSolved = active.every((player) => timed.solvedIds.includes(player.id))
-  if (!allSolved) return timed
+  if (timed.solvedIds.length === 0) return timed
   const next = structuredClone(timed)
   next.phase = 'reveal'
   return next
@@ -207,6 +231,7 @@ export function advance(
   next.roundIndex = upcoming
   next.phase = 'playing'
   next.solvedIds = []
+  next.guesses = []
   next.feedback = {}
   const duration = roundDurationMs(next.clipSeconds, graceSeconds)
   next.roundStartedAt = now
@@ -224,6 +249,7 @@ export function restart(room: Room, playerId: string): RoomResult {
   next.roundStartedAt = null
   next.roundEndsAt = null
   next.solvedIds = []
+  next.guesses = []
   next.feedback = {}
   next.starting = false
   for (const player of next.players) player.score = 0
@@ -256,9 +282,15 @@ export function toView(room: Room, playerId: string): RoomView | null {
   if (!you) return null
   const song = room.roundIndex >= 0 ? room.songs[room.roundIndex] : undefined
   const showClip = room.phase === 'playing' && song ? { previewUrl: song.previewUrl } : null
+  const answerVisible = room.phase === 'reveal' || room.phase === 'done'
   const showReveal =
-    (room.phase === 'reveal' || room.phase === 'done') && song
+    answerVisible && song
       ? { title: song.title, artist: song.artist, storeUrl: song.storeUrl }
+      : null
+  const youSolved = room.solvedIds.includes(you.id)
+  const artworkUrl =
+    song?.artworkUrl && (answerVisible || (room.phase === 'playing' && youSolved))
+      ? song.artworkUrl
       : null
   return {
     code: room.code,
@@ -279,6 +311,8 @@ export function toView(room: Room, playerId: string): RoomView | null {
     })),
     clip: showClip,
     reveal: showReveal,
+    artworkUrl,
+    guesses: room.phase === 'playing' || room.phase === 'reveal' ? room.guesses : [],
     lastGuess: room.feedback[playerId] ?? null,
     roundEndsAt: room.phase === 'playing' ? room.roundEndsAt : null,
     starting: room.starting,

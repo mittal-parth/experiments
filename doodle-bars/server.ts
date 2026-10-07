@@ -61,5 +61,5 @@ server.on('upgrade', (request, socket, head) => {
 })
 
 server.listen(port, hostname, () => {
-  console.log(`Doodle Bars ready at http://${hostname}:${port}`)
+  console.log(`Song Guesser ready at http://${hostname}:${port}`)
 })

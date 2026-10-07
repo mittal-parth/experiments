@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   DrawablyButton,
   DrawablyCard,
@@ -14,11 +14,12 @@ import { assertNever } from '@/game/assert-never'
 import { CLIP_CHOICES, DEFAULT_CLIP_SECONDS } from '@/game/constants'
 import { cleanCode, cleanNickname } from '@/game/names'
 import type { ClientMessage, RoomView } from '@/game/protocol'
-import { ClipPlayer } from './ClipPlayer'
+import { standings, winnerText } from '@/game/standings'
+import { ClipPlayer, unlockAudio } from './ClipPlayer'
 import { DoodleField, NoteBand } from './Doodles'
 import { useRoom } from './useRoom'
 
-const NICK_KEY = 'doodle-bars-nick'
+const NICK_KEY = 'song-guesser-nick'
 
 export function GameApp() {
   const room = useRoom()
@@ -30,9 +31,9 @@ export function GameApp() {
       <main className="sheet" data-testid="phase" data-phase={phase}>
         <header className="mast">
           <NoteBand />
-          <p className="eyebrow">name that hook</p>
+          <p className="eyebrow">Hear a clip. Type the title.</p>
           <h1>
-            Doodle <DrawablyHighlight seed={4} fill="#f0a202" stroke="#c47b12">Bars</DrawablyHighlight>
+            Song <DrawablyHighlight seed={4} fill="#f0a202" stroke="#c47b12">Guesser</DrawablyHighlight>
           </h1>
         </header>
         {room.error ? (
@@ -83,8 +84,10 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
   const [localError, setLocalError] = useState<string | null>(null)
 
   useEffect(() => {
-    const stored = localStorage.getItem(NICK_KEY)
+    const stored = localStorage.getItem(NICK_KEY) ?? localStorage.getItem('doodle-bars-nick')
     if (stored) setNickname(stored)
+    const fromUrl = cleanCode(new URLSearchParams(window.location.search).get('code') ?? '')
+    if (fromUrl) setCode(fromUrl)
   }, [])
 
   function remember(value: string) {
@@ -105,6 +108,7 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
   function create(mode: 'solo' | 'room') {
     const nick = nickOrWarn()
     if (!nick) return
+    unlockAudio()
     send({ type: 'create', nickname: nick, playlistId, clipSeconds, mode })
   }
 
@@ -116,13 +120,14 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
       setLocalError('Enter the 4-character room code')
       return
     }
+    unlockAudio()
     send({ type: 'join', nickname: nick, code: roomCode })
   }
 
   return (
     <div className="stack">
       <DrawablyCard className="panel panel-lilac" seed={2} stroke="#7b4b94" fill="#7b4b94">
-        <p className="lede">Hear a few seconds. Name the song. No account, just a nickname.</p>
+        <p className="lede">Hear a few seconds. Name the song.</p>
       </DrawablyCard>
       {localError ? (
         <p className="error" role="alert">
@@ -229,6 +234,7 @@ function Lobby({
             <p className="code" data-testid="room-code">
               <DrawablyCircle seed={15} stroke="#e24b4b">{view.code}</DrawablyCircle>
             </p>
+            <RoomLink code={view.code} />
           </>
         ) : (
           <p className="lede">Solo game. Pick a playlist, then start.</p>
@@ -265,6 +271,7 @@ function Lobby({
             state={view.starting ? 'loading' : 'idle'}
             disabled={view.starting}
             onClick={() => {
+              unlockAudio()
               send({ type: 'start' })
             }}
           >
@@ -289,13 +296,13 @@ function Playing({
   send: (message: ClientMessage) => void
 }) {
   const [guess, setGuess] = useState('')
-  const left = useCountdown(view.roundEndsAt)
+  const youSolved = view.players.some((player) => player.id === view.you.id && player.solved)
+  const left = useCountdown(youSolved ? null : view.roundEndsAt)
 
   function submit() {
     const text = guess.trim()
-    if (!text) return
+    if (!text || youSolved) return
     send({ type: 'guess', text })
-    setGuess('')
   }
 
   return (
@@ -304,13 +311,20 @@ function Playing({
       <DrawablyCard className="panel panel-sea" seed={18} stroke="#1f8a70" fill="#1f8a70">
         <div className="stack">
           {view.clip ? <ClipPlayer key={view.roundNumber} url={view.clip.previewUrl} seconds={view.clipSeconds} /> : null}
-          <p className="quiet">
-            First {view.clipSeconds} seconds. Previews often open on the hook, not second zero of the song.
-          </p>
+          <p className="quiet">This clip is {view.clipSeconds} seconds, from later in the preview.</p>
+          <p className="quiet">Faster answers score more.</p>
           <p className="quiet" data-testid="courtesy">
             Preview courtesy of iTunes.
           </p>
-          {left !== null ? <p className="clock">{left}s left to guess</p> : null}
+          {youSolved ? (
+            <p className="clock" data-testid="clock">
+              Timer stopped
+            </p>
+          ) : left !== null ? (
+            <p className="clock" data-testid="clock">
+              {left}s left
+            </p>
+          ) : null}
         </div>
       </DrawablyCard>
       <form
@@ -344,6 +358,7 @@ function Playing({
                 seed={21}
                 fill="#e24b4b"
                 paper="#fffaf5"
+                disabled={youSolved}
               >
                 Guess
               </DrawablyButton>
@@ -351,6 +366,8 @@ function Playing({
           </div>
         </DrawablyCard>
       </form>
+      <GuessChat view={view} />
+      <Cover url={view.artworkUrl} />
       <Feedback last={view.lastGuess} />
       <Scoreboard view={view} />
     </div>
@@ -369,6 +386,7 @@ function Reveal({
       <RoundHeading view={view} />
       {view.reveal ? (
         <DrawablyCard className="panel panel-sun" seed={22} stroke="#c47b12" fill="#f0a202">
+          <Cover url={view.artworkUrl} />
           <p className="quiet">That was</p>
           <h2 data-testid="reveal-title">
             <DrawablyHighlight seed={23} fill="#f0a202" stroke="#c47b12">{view.reveal.title}</DrawablyHighlight>
@@ -382,6 +400,7 @@ function Reveal({
       <p className="quiet" data-testid="courtesy">
         Preview courtesy of iTunes.
       </p>
+      <GuessChat view={view} />
       <Feedback last={view.lastGuess} />
       <Scoreboard view={view} />
       {view.you.isHost ? (
@@ -414,15 +433,35 @@ function Done({
   send: (message: ClientMessage) => void
   leave: () => void
 }) {
+  const ranked = standings(view.players)
+  const headline = winnerText(view.players)
   return (
     <div className="stack">
-      <h2>That&apos;s the set</h2>
+      <h2>Final scores</h2>
+      {headline ? (
+        <p className="winner-line" data-testid="winner">
+          {headline}
+        </p>
+      ) : (
+        <p className="winner-line" data-testid="winner">
+          You scored {view.players[0]?.score ?? 0}
+        </p>
+      )}
+      <Cover url={view.artworkUrl} />
       {view.reveal ? (
         <p>
-          Last one was {view.reveal.title} · {view.reveal.artist}
+          Last song was {view.reveal.title}, {view.reveal.artist}
         </p>
       ) : null}
-      <Scoreboard view={view} />
+      <ol className="leaderboard" data-testid="leaderboard">
+        {ranked.map((player) => (
+          <li key={player.id} className={player.id === view.you.id ? 'you' : undefined}>
+            <span className="place">{player.place}</span>
+            <span>{player.nickname}</span>
+            <span>{player.score}</span>
+          </li>
+        ))}
+      </ol>
       <div className="row">
         {view.you.isHost ? (
           <DrawablyButton
@@ -498,7 +537,7 @@ function ClipField({
   return (
     <div className="stack tight">
       <span>Clip length</span>
-      <div className="row">
+      <div className="row clip-choices">
         {CLIP_CHOICES.map((choice) => (
           <DrawablyButton
             key={choice}
@@ -506,8 +545,8 @@ function ClipField({
             data-testid={`clip-${choice}`}
             seed={30 + choice}
             variant={choice === seconds ? 'solid' : 'outline'}
-            fill={choice === seconds ? '#1f8a70' : undefined}
-            paper={choice === seconds ? '#fffaf5' : undefined}
+            fill={choice === seconds ? '#1f8a70' : '#fff6ea'}
+            paper={choice === seconds ? '#fffaf5' : '#241c16'}
             stroke="#1f8a70"
             disabled={disabled}
             aria-pressed={choice === seconds}
@@ -534,6 +573,15 @@ function Feedback({ last }: { last: RoomView['lastGuess'] }) {
       </DrawablyCard>
     )
   }
+  if (last.close) {
+    return (
+      <DrawablyCard className="panel panel-sun" seed={28} stroke="#c47b12" fill="#f0a202">
+        <p className="feedback" data-testid="guess-feedback">
+          Very close
+        </p>
+      </DrawablyCard>
+    )
+  }
   return (
     <DrawablyCard className="panel panel-rose" seed={27} stroke="#c44536" fill="#e24b4b">
       <p className="feedback" data-testid="guess-feedback">Not quite</p>
@@ -541,10 +589,55 @@ function Feedback({ last }: { last: RoomView['lastGuess'] }) {
   )
 }
 
+function GuessChat({ view }: { view: RoomView }) {
+  const bottomRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [view.guesses])
+
+  return (
+    <div className="chat" data-testid="guess-chat">
+      {view.guesses.length === 0 ? <p className="quiet">No guesses yet.</p> : null}
+      <ul>
+        {view.guesses.map((guess) => (
+          <li key={guess.id} className={guess.playerId === view.you.id ? 'you' : undefined} data-kind={guess.kind}>
+            <span className="who">{guess.nickname}</span>
+            <span>{guess.text}</span>
+            {guess.kind === 'close' ? <span className="tag">Very close</span> : null}
+            {guess.kind === 'correct' ? <span className="tag">{guess.points} points</span> : null}
+          </li>
+        ))}
+      </ul>
+      <div ref={bottomRef} />
+    </div>
+  )
+}
+
+function Cover({ url }: { url: string | null }) {
+  if (!url) return null
+  return <img className="cover" data-testid="reveal-art" src={url} alt="Album cover" />
+}
+
+function RoomLink({ code }: { code: string }) {
+  const [link, setLink] = useState('')
+  useEffect(() => {
+    setLink(`${window.location.origin}/?code=${code}`)
+  }, [code])
+  if (!link) return null
+  return (
+    <p className="share-link" data-testid="room-link">
+      Send this page. The code is in the link.
+      <br />
+      {link}
+    </p>
+  )
+}
+
 function Scoreboard({ view }: { view: RoomView }) {
+  const rows = standings(view.players)
   return (
     <ul className="scores" data-testid="scoreboard">
-      {view.players.map((player) => (
+      {rows.map((player) => (
         <li
           key={player.id}
           className={player.id === view.you.id ? 'you' : undefined}

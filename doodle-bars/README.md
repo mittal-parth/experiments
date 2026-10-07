@@ -1,6 +1,6 @@
-# Doodle Bars
+# Song Guesser
 
-Guess the song from the first few seconds of an official preview. Nickname only. Host a room and share the code.
+Hear a few seconds of a song and name it. Host a room and send the link. The room code is in the URL.
 
 Set the Vercel project root to `doodle-bars`. WebSockets use Fluid compute (`experimental_upgradeWebSocket` on `/api/ws`). Locally, `npm run dev` attaches the same hub with the `ws` package, because that upgrade helper does not run under `next dev`.
 

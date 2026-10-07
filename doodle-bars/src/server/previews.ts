@@ -16,6 +16,14 @@ type LookupTrack = {
   trackId?: number
   previewUrl?: string
   trackViewUrl?: string
+  artworkUrl100?: string
+}
+
+const FIXTURE_ARTWORK = '/fixture-cover.svg'
+
+export function largerArtwork(raw: unknown): string | null {
+  if (typeof raw !== 'string' || !raw.startsWith('https://')) return null
+  return raw.replace(/\/\d+x\d+bb\.jpg(?=$|\?)/i, '/600x600bb.jpg')
 }
 
 export function previewOptionsFromEnv(): PreviewOptions {
@@ -52,7 +60,9 @@ async function resolvePreviews(
   options: PreviewOptions,
 ): Promise<RoundSong[]> {
   if (options.mode === 'fixture') {
-    return songs.map((song) => toRoundSong(song, '/api/fixture-tone', storeUrl(storefront, song.trackId)))
+    return songs.map((song) =>
+      toRoundSong(song, '/api/fixture-tone', storeUrl(storefront, song.trackId), FIXTURE_ARTWORK),
+    )
   }
   const ids = songs.map((song) => song.trackId).join(',')
   const url = `https://itunes.apple.com/lookup?id=${ids}&country=${encodeURIComponent(storefront)}`
@@ -66,13 +76,18 @@ async function resolvePreviews(
     const match = byId.get(song.trackId)
     if (!match?.previewUrl) continue
     resolved.push(
-      toRoundSong(song, match.previewUrl, match.trackViewUrl ?? storeUrl(storefront, song.trackId)),
+      toRoundSong(
+        song,
+        match.previewUrl,
+        match.trackViewUrl ?? storeUrl(storefront, song.trackId),
+        largerArtwork(match.artworkUrl100),
+      ),
     )
   }
   return resolved
 }
 
-function toRoundSong(song: Song, previewUrl: string, store: string): RoundSong {
+function toRoundSong(song: Song, previewUrl: string, store: string, artworkUrl: string | null): RoundSong {
   return {
     trackId: song.trackId,
     title: song.title,
@@ -80,6 +95,7 @@ function toRoundSong(song: Song, previewUrl: string, store: string): RoundSong {
     aliases: [...(song.aliases ?? [])],
     previewUrl,
     storeUrl: store,
+    artworkUrl,
   }
 }
 

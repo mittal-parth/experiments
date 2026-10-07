@@ -63,12 +63,13 @@ describe('hub', () => {
     if (playing?.type !== 'snapshot') throw new Error('expected snapshot')
     expect(playing.view.phase).toBe('playing')
     expect(JSON.stringify(playing.view)).not.toContain('Kesariya')
+    expect(playing.view.artworkUrl).toBeNull()
 
     host.emit({ type: 'guess', text: 'nope' })
     const missed = lastSnapshot(host.sent)
     if (missed?.type !== 'snapshot') throw new Error('expected miss')
     expect(missed.view.phase).toBe('playing')
-    expect(missed.view.lastGuess).toEqual({ correct: false, points: 0 })
+    expect(missed.view.lastGuess).toEqual({ correct: false, close: false, points: 0 })
     expect(JSON.stringify(missed.view)).not.toContain('Kesariya')
 
     host.emit({ type: 'guess', text: 'Kesariya' })
@@ -76,6 +77,7 @@ describe('hub', () => {
     if (revealed?.type !== 'snapshot') throw new Error('expected reveal')
     expect(revealed.view.reveal?.title).toBe('Kesariya')
     expect(revealed.view.reveal?.storeUrl).toContain('music.apple.com')
+    expect(revealed.view.artworkUrl).toBe('/fixture-cover.svg')
     expect(revealed.view.you.nickname).toBe('Aman')
     expect(revealed.view.players[0]?.score).toBeGreaterThan(0)
   })

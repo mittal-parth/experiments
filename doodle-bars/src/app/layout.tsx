@@ -5,8 +5,8 @@ import 'drawably/style.css'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Doodle Bars',
-  description: 'Guess the song from the first seconds of a preview.',
+  title: 'Song Guesser',
+  description: 'Hear a short clip and name the song.',
 }
 
 export const viewport: Viewport = {

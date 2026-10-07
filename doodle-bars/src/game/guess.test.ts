@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { matchesAnswer, normalizeAnswer } from './guess'
+import { judgeGuess, matchesAnswer, normalizeAnswer } from './guess'
 
 describe('normalizeAnswer', () => {
   it('strips movie parentheses, case, and punctuation', () => {
@@ -19,5 +19,13 @@ describe('matchesAnswer', () => {
     expect(matchesAnswer('Arijit Singh', 'Tum Hi Ho')).toBe(false)
     expect(matchesAnswer('shape', 'Shape of You')).toBe(false)
     expect(matchesAnswer('a', 'Gerua')).toBe(false)
+  })
+
+  it('accepts a near spelling and flags a short prefix as close', () => {
+    expect(judgeGuess('Keshariya', 'Kesariya')).toBe('correct')
+    expect(judgeGuess('Chana Mereya', 'Channa Mereya')).toBe('correct')
+    expect(judgeGuess('Rabta', 'Raabta')).toBe('correct')
+    expect(judgeGuess('tum hi', 'Tum Hi Ho')).toBe('close')
+    expect(judgeGuess('nope', 'Kesariya')).toBe('miss')
   })
 })

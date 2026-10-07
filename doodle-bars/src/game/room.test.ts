@@ -8,6 +8,7 @@ const song = (title: string): RoundSong => ({
   aliases: [],
   previewUrl: '/api/fixture-tone',
   storeUrl: 'https://music.apple.com/in/song/1',
+  artworkUrl: 'https://example.test/cover.jpg',
 })
 
 function lobby() {
@@ -44,22 +45,44 @@ describe('room', () => {
     const view = toView(begun.room, 'host')
     expect(view?.clip).toEqual({ previewUrl: '/api/fixture-tone' })
     expect(view?.reveal).toBeNull()
+    expect(view?.artworkUrl).toBeNull()
     expect(JSON.stringify(view)).not.toContain('Kesariya')
+    expect(JSON.stringify(view)).not.toContain('example.test')
     expect(JSON.stringify(view)).not.toContain('1635014240')
 
     const wrong = submitGuess(begun.room, 'host', 'nope', 1_100)
     if (!wrong.ok) throw new Error('expected guess')
     expect(wrong.room.phase).toBe('playing')
-    expect(toView(wrong.room, 'host')?.lastGuess).toEqual({ correct: false, points: 0 })
+    expect(toView(wrong.room, 'host')?.lastGuess).toEqual({ correct: false, close: false, points: 0 })
+    expect(toView(wrong.room, 'host')?.guesses.map((guess) => guess.text)).toEqual(['nope'])
 
     const right = submitGuess(wrong.room, 'host', 'Kesariya', 1_200)
     if (!right.ok) throw new Error('expected score')
     expect(right.room.phase).toBe('reveal')
     expect(toView(right.room, 'host')?.reveal?.title).toBe('Kesariya')
+    expect(toView(right.room, 'host')?.artworkUrl).toBe('https://example.test/cover.jpg')
     expect(right.room.players[0]?.score).toBeGreaterThan(0)
   })
 
-  it('lets a second player score for less, then finishes the set', () => {
+  it('marks a near miss as close without points, and a fuzzy spelling scores', () => {
+    const started = markStarting(lobby(), 'host')
+    if (!started.ok) throw new Error('expected start')
+    const begun = beginGame(started.room, [song('Tum Hi Ho'), song('Kesariya')], 1_000, 12)
+    if (!begun.ok) throw new Error('expected begin')
+    const close = submitGuess(begun.room, 'host', 'tum hi', 1_200)
+    if (!close.ok) throw new Error('expected close')
+    expect(close.room.phase).toBe('playing')
+    expect(close.room.players[0]?.score).toBe(0)
+    expect(toView(close.room, 'host')?.lastGuess).toEqual({ correct: false, close: true, points: 0 })
+    expect(toView(close.room, 'host')?.reveal).toBeNull()
+
+    const scored = submitGuess(close.room, 'host', 'Tumhee Ho', 1_500)
+    if (!scored.ok) throw new Error('expected score')
+    expect(scored.room.phase).toBe('reveal')
+    expect(scored.room.players[0]?.score).toBeGreaterThan(0)
+  })
+
+  it('ends the room on the first correct guess and shares the guess log', () => {
     const open = lobby()
     const joined = joinRoom(open, { id: 'guest', nickname: 'Riya' })
     if (!joined.ok) throw new Error('expected join')
@@ -67,43 +90,39 @@ describe('room', () => {
     if (!started.ok) throw new Error('expected start')
     const begun = beginGame(started.room, [song('Kesariya'), song('Ilahi')], 5_000, 12)
     if (!begun.ok) throw new Error('expected begin')
-    const first = submitGuess(begun.room, 'guest', 'Kesariya', 5_000)
+    const miss = submitGuess(begun.room, 'guest', 'nope', 5_100)
+    if (!miss.ok) throw new Error('expected miss')
+    expect(miss.room.phase).toBe('playing')
+    expect(toView(miss.room, 'host')?.guesses.map((guess) => [guess.nickname, guess.text])).toEqual([
+      ['Riya', 'nope'],
+    ])
+    expect(JSON.stringify(toView(miss.room, 'host'))).not.toContain('Kesariya')
+
+    const first = submitGuess(miss.room, 'guest', 'Kesariya', 5_200)
     if (!first.ok) throw new Error('expected first score')
-    expect(first.room.phase).toBe('playing')
-    const second = submitGuess(first.room, 'host', 'Kesariya', 5_000)
-    if (!second.ok) throw new Error('expected second score')
-    expect(second.room.phase).toBe('reveal')
-    const guest = second.room.players.find((player) => player.id === 'guest')
-    const host = second.room.players.find((player) => player.id === 'host')
+    expect(first.room.phase).toBe('reveal')
+    expect(toView(first.room, 'guest')?.artworkUrl).toBe('https://example.test/cover.jpg')
+    expect(toView(first.room, 'host')?.artworkUrl).toBe('https://example.test/cover.jpg')
+    expect(toView(first.room, 'host')?.reveal?.title).toBe('Kesariya')
+    expect(submitGuess(first.room, 'host', 'Kesariya', 5_300)).toEqual({
+      ok: false,
+      error: 'Wait for the next round',
+    })
+    const guest = first.room.players.find((player) => player.id === 'guest')
+    const host = first.room.players.find((player) => player.id === 'host')
     if (!guest || !host) throw new Error('missing players')
     expect(guest.score).toBeGreaterThan(host.score)
+    expect(host.score).toBe(0)
 
-    const next = advance(second.room, 'host', 9_000, 12)
+    const next = advance(first.room, 'host', 9_000, 12)
     if (!next.ok) throw new Error('expected next')
     expect(next.room.phase).toBe('playing')
     expect(next.room.roundIndex).toBe(1)
+    expect(next.room.guesses).toEqual([])
     const scored = submitGuess(next.room, 'host', 'Ilahi', 9_100)
     if (!scored.ok) throw new Error('expected score')
-    const guestStill = scored.room.players.find((player) => player.id === 'guest')
-    if (!guestStill) throw new Error('missing guest')
-    const waiting = { ...scored.room, players: scored.room.players.map((player) => player.id === 'guest' ? { ...player, connected: false } : player) }
-    const revealed = submitGuess(waiting, 'host', 'Ilahi', 9_100)
-    expect(revealed.ok).toBe(false)
-    const hostOnly = {
-      ...scored.room,
-      players: scored.room.players.map((player) =>
-        player.id === 'guest' ? { ...player, connected: false } : player,
-      ),
-    }
-    const finishGuess = submitGuess(
-      { ...hostOnly, solvedIds: [], feedback: {} },
-      'host',
-      'Ilahi',
-      9_200,
-    )
-    if (!finishGuess.ok) throw new Error('expected reveal')
-    expect(finishGuess.room.phase).toBe('reveal')
-    const done = advance(finishGuess.room, 'host', 20_000, 12)
+    expect(scored.room.phase).toBe('reveal')
+    const done = advance(scored.room, 'host', 20_000, 12)
     if (!done.ok) throw new Error('expected done')
     expect(done.room.phase).toBe('done')
     const again = restart(done.room, 'host')

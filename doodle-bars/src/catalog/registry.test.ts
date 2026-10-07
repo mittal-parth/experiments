@@ -11,8 +11,17 @@ describe('playlist registry', () => {
       expect(getPlaylist(choice.id)?.name).toBe(choice.name)
       expect(getPlaylist(choice.id)?.songs.length).toBeGreaterThan(0)
     }
-    const ids = listPlaylists().flatMap((playlist) => playlist.songs.map((song) => song.trackId))
-    expect(new Set(ids).size).toBe(ids.length)
-    expect(getPlaylist('hindi')?.songs[0]?.title).toBe('Kesariya')
+    for (const playlist of listPlaylists()) {
+      const ids = playlist.songs.map((song) => song.trackId)
+      expect(new Set(ids).size).toBe(ids.length)
+    }
+    const hindiSongs = getPlaylist('hindi')?.songs ?? []
+    expect(hindiSongs[0]?.title).toBe('Kesariya')
+    expect(hindiSongs.length).toBeGreaterThan(70)
+    expect(getPlaylist('hindi-romance')?.songs.length).toBeGreaterThan(20)
+    expect(getPlaylist('hindi-party')?.songs.length).toBeGreaterThan(15)
+    expect(getPlaylist('hindi-classics')?.songs.length).toBeGreaterThan(10)
+    expect(getPlaylist('hindi-sufi')?.songs.length).toBeGreaterThan(8)
+    expect(getPlaylist('punjabi')?.songs.length).toBeGreaterThan(40)
   })
 })

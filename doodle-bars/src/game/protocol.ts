@@ -2,6 +2,16 @@ export type Phase = 'lobby' | 'playing' | 'reveal' | 'done'
 
 export type GuessFeedback = {
   correct: boolean
+  close: boolean
+  points: number
+}
+
+export type SharedGuess = {
+  id: string
+  playerId: string
+  nickname: string
+  text: string
+  kind: 'miss' | 'close' | 'correct'
   points: number
 }
 
@@ -24,6 +34,8 @@ export type RoomView = {
   }[]
   clip: { previewUrl: string } | null
   reveal: { title: string; artist: string; storeUrl: string } | null
+  artworkUrl: string | null
+  guesses: SharedGuess[]
   lastGuess: GuessFeedback | null
   roundEndsAt: number | null
   starting: boolean

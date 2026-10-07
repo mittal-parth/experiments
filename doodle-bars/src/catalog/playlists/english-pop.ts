@@ -4,7 +4,7 @@ import type { Playlist } from '../types'
 export const englishPop: Playlist = {
   id: 'english-pop',
   name: 'English pop',
-  description: 'Songs that stuck.',
+  description: 'Pop songs.',
   storefront: 'us',
   songs: [
     { trackId: 1193701392, title: 'Shape of You', artist: 'Ed Sheeran' },
