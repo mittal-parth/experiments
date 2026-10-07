@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { advance, beginGame, configureRoom, createRoom, joinRoom, markStarting, restart, submitGuess, toView, type RoundSong } from './room'
+import { advance, beginGame, configureRoom, createRoom, joinRoom, markStarting, restart, revealIfDue, submitGuess, toView, type RoundSong } from './room'
 import { pointsForGuess, roundDurationMs } from './score'
 
 const song = (title: string): RoundSong => ({
@@ -193,5 +193,44 @@ describe('room', () => {
       storeUrl: track.storeUrl,
       trackId: track.trackId,
     })
+  })
+
+  it('counts guessed songs at the end and keeps each guess’s points', () => {
+    const started = markStarting(lobby(), 'host')
+    if (!started.ok) throw new Error('expected start')
+    const first = { ...song('Kesariya'), artist: 'Pritam & Arijit Singh', storeUrl: 'https://music.apple.com/in/song/1' }
+    const second = { ...song('Ilahi'), storeUrl: 'https://music.apple.com/in/song/2' }
+    const begun = beginGame(started.room, [first, second], 1_000, 12)
+    if (!begun.ok) throw new Error('expected begin')
+    const duration = roundDurationMs(5, 12)
+    const artist = submitGuess(begun.room, 'host', 'Arijit Singh', 1_000)
+    if (!artist.ok) throw new Error('expected artist')
+    const titled = submitGuess(artist.room, 'host', 'Kesariya', 1_200)
+    if (!titled.ok) throw new Error('expected title')
+    const next = advance(titled.room, 'host', 2_000, 12)
+    if (!next.ok) throw new Error('expected next')
+    expect(JSON.stringify(toView(next.room, 'host'))).not.toContain('Kesariya')
+
+    const ends = next.room.roundEndsAt ?? 0
+    const revealed = revealIfDue(next.room, ends)
+    const done = advance(revealed, 'host', ends, 12)
+    if (!done.ok) throw new Error('expected done')
+    expect(toView(done.room, 'host')?.recap).toEqual([
+      {
+        title: 'Kesariya',
+        artist: 'Pritam & Arijit Singh',
+        storeUrl: first.storeUrl,
+        scores: [
+          { nickname: 'Aman', points: pointsForGuess(0, duration, 'artist'), kind: 'artist' },
+          { nickname: 'Aman', points: pointsForGuess(200, duration, 'title'), kind: 'correct' },
+        ],
+      },
+      {
+        title: 'Ilahi',
+        artist: 'Someone',
+        storeUrl: second.storeUrl,
+        scores: [],
+      },
+    ])
   })
 })

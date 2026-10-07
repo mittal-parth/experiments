@@ -16,6 +16,19 @@ export type SharedGuess = {
   points: number
 }
 
+export type RoundScore = {
+  nickname: string
+  points: number
+  kind: 'correct' | 'artist'
+}
+
+export type RoundRecap = {
+  title: string
+  artist: string
+  storeUrl: string
+  scores: RoundScore[]
+}
+
 export type RoomView = {
   code: string
   mode: 'solo' | 'room'
@@ -38,6 +51,7 @@ export type RoomView = {
   reveal: { title: string; artist: string; storeUrl: string; trackId: number } | null
   artworkUrl: string | null
   guesses: SharedGuess[]
+  recap: RoundRecap[]
   lastGuess: GuessFeedback | null
   roundEndsAt: number | null
   starting: boolean

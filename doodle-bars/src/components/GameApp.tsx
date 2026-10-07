@@ -42,7 +42,7 @@ export function GameApp() {
       <main className="sheet" data-testid="phase" data-phase={phase}>
         <header className="mast">
           <NoteBand />
-          <p className="eyebrow">Hear a clip. Name the song or the artist.</p>
+          <p className="eyebrow">Hear a clip. Guess the song or the artist.</p>
           <h1>
             Song <DrawablyHighlight seed={4} fill="#f0a202" stroke="#c47b12">Guesser</DrawablyHighlight>
           </h1>
@@ -138,7 +138,7 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
   return (
     <div className="stack">
       <DrawablyCard className="panel panel-lilac" seed={2} stroke="#7b4b94" fill="#7b4b94">
-        <p className="lede">Hear a few seconds. Name the song or the artist.</p>
+        <p className="lede">Hear a few seconds. Guess the song or the artist.</p>
       </DrawablyCard>
       {localError ? (
         <p className="error" role="alert">
@@ -450,6 +450,8 @@ function Done({
 }) {
   const ranked = standings(view.players)
   const headline = winnerText(view.players)
+  const guessed = view.recap.filter((round) => round.scores.some((score) => score.kind === 'correct'))
+  const missed = view.recap.filter((round) => !round.scores.some((score) => score.kind === 'correct'))
   return (
     <div className="stack">
       <h2>Final scores</h2>
@@ -462,12 +464,6 @@ function Done({
           You scored {view.players[0]?.score ?? 0}
         </p>
       )}
-      <Cover url={view.artworkUrl} />
-      {view.reveal ? (
-        <p>
-          Last song was {view.reveal.title}, {view.reveal.artist}
-        </p>
-      ) : null}
       <ol className="leaderboard" data-testid="leaderboard">
         {ranked.map((player) => (
           <li key={player.id} className={player.id === view.you.id ? 'you' : undefined}>
@@ -477,6 +473,8 @@ function Done({
           </li>
         ))}
       </ol>
+      <SongRecap heading="Guessed" countTestId="guessed-count" rounds={guessed} />
+      <SongRecap heading="Not guessed" rounds={missed} />
       <div className="row">
         {view.you.isHost ? (
           <DrawablyButton
@@ -500,6 +498,72 @@ function Done({
         </DrawablyButton>
       </div>
     </div>
+  )
+}
+
+function SongRecap({
+  heading,
+  rounds,
+  countTestId,
+}: {
+  heading: string
+  rounds: RoomView['recap']
+  countTestId?: string
+}) {
+  if (rounds.length === 0 && heading !== 'Guessed') return null
+  return (
+    <section className="stack tight">
+      <h3 className="recap-heading" data-testid={countTestId}>
+        {heading} {rounds.length}
+      </h3>
+      {rounds.length > 0 ? (
+        <ul className="recap" data-testid={heading === 'Guessed' ? 'recap' : 'recap-missed'}>
+          {rounds.map((round) => {
+            const solved = round.scores.some((score) => score.kind === 'correct')
+            const tone = [solved ? 'hit' : 'miss', round.scores.length > 0 ? 'scored' : ''].filter(Boolean).join(' ')
+            return (
+              <li key={`${round.storeUrl}-${round.title}`} className={tone}>
+                <div className="recap-copy">
+                  <p className="recap-title">{round.title}</p>
+                  <p className="recap-artist">{round.artist}</p>
+                </div>
+                <a
+                  className="store-icon"
+                  href={round.storeUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={`Listen to ${round.title} on Apple Music`}
+                >
+                  <LinkIcon />
+                </a>
+                {round.scores.length > 0 ? (
+                  <ul className="recap-scores">
+                    {round.scores.map((score, index) => (
+                      <li key={`${score.nickname}-${score.kind}-${index}`} data-kind={score.kind}>
+                        <span className="recap-who">{score.nickname}</span>
+                        <span className="recap-pts" data-testid="recap-points">
+                          {score.points}
+                          {score.kind === 'artist' ? <span className="recap-kind"> artist</span> : null}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      ) : null}
+    </section>
+  )
+}
+
+function LinkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M14 5h5v5M19 5l-9 9" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M17 13.5V18a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h4.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   )
 }
 

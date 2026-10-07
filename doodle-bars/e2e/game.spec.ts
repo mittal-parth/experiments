@@ -78,6 +78,19 @@ test('a room link joins, the timer stops after a correct guess, and the leaderbo
   await expect(host.getByTestId('winner')).toHaveText('Riya wins')
   await expect(host.getByTestId('leaderboard')).toContainText('Riya')
   await expect(guest.getByTestId('winner')).toHaveText('Riya wins')
+  await expect(host.getByTestId('guessed-count')).toHaveText('Guessed 5')
+  await expect(host.getByTestId('recap-missed')).toHaveCount(0)
+  for (const title of ROUND_TITLES) {
+    await expect(host.getByTestId('recap')).toContainText(title)
+  }
+  await expect(host.getByTestId('recap-points').first()).toHaveText(/\d+/)
+  await expect(host.locator('.recap-title').first()).toHaveCSS('text-decoration-line', 'none')
+  const titleSize = await host.locator('.recap-title').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize))
+  const artistSize = await host.locator('.recap-artist').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize))
+  expect(artistSize).toBeLessThan(titleSize)
+  const padding = await host.locator('.recap > li').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).paddingTop))
+  expect(padding).toBeGreaterThanOrEqual(16)
+  await expect(host.getByRole('link', { name: /Listen to Kesariya on Apple Music/ })).toHaveAttribute('href', /music\.apple\.com/)
 
   await hostContext.close()
   await guestContext.close()
@@ -123,6 +136,8 @@ test('naming the artist scores fewer points and the revealed song is remembered'
   }
   await page.getByTestId('next-round').click()
   await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'done')
+  await expect(page.getByTestId('guessed-count')).toHaveText('Guessed 5')
+  await expect(page.getByTestId('recap').locator('[data-kind="artist"]')).toContainText('artist')
   await page.getByTestId('play-again').click()
   await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'lobby')
 

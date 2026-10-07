@@ -1,7 +1,7 @@
 import { MAX_PLAYERS } from './constants'
 import { clampClipSeconds } from './clip'
 import { judgeArtist, judgeGuess } from './guess'
-import type { GuessFeedback, RoomView, SharedGuess } from './protocol'
+import type { GuessFeedback, RoomView, RoundRecap, SharedGuess } from './protocol'
 import { pointsForGuess, roundDurationMs } from './score'
 
 export type RoundSong = {
@@ -37,6 +37,7 @@ export type Room = {
   solvedIds: string[]
   artistIds: string[]
   guesses: SharedGuess[]
+  history: RoundRecap[]
   feedback: Record<string, GuessFeedback>
   starting: boolean
 }
@@ -70,6 +71,7 @@ export function createRoom(input: {
     solvedIds: [],
     artistIds: [],
     guesses: [],
+    history: [],
     feedback: {},
     starting: false,
   }
@@ -142,6 +144,7 @@ export function beginGame(
   next.solvedIds = []
   next.artistIds = []
   next.guesses = []
+  next.history = []
   next.feedback = {}
   const duration = roundDurationMs(next.clipSeconds, graceSeconds)
   next.roundStartedAt = now
@@ -201,6 +204,23 @@ function awardPoints(room: Room, playerId: string, now: number, reason: 'title' 
   return points
 }
 
+function snapshotRound(room: Room): RoundRecap | null {
+  const song = room.songs[room.roundIndex]
+  if (!song) return null
+  const scores: RoundRecap['scores'] = []
+  for (const guess of room.guesses) {
+    if (guess.points <= 0) continue
+    if (guess.kind !== 'correct' && guess.kind !== 'artist') continue
+    scores.push({ nickname: guess.nickname, points: guess.points, kind: guess.kind })
+  }
+  return {
+    title: song.title,
+    artist: song.artist,
+    storeUrl: song.storeUrl,
+    scores,
+  }
+}
+
 function guessNote(
   room: Room,
   player: Player,
@@ -244,6 +264,8 @@ export function advance(
   if (room.hostId !== playerId) return { ok: false, error: 'Only the host can do that' }
   if (room.phase !== 'reveal') return { ok: false, error: 'Wait for the reveal' }
   const next = structuredClone(room)
+  const recorded = snapshotRound(room)
+  if (recorded) next.history.push(recorded)
   const upcoming = room.roundIndex + 1
   if (upcoming >= room.songs.length) {
     next.phase = 'done'
@@ -273,6 +295,7 @@ export function restart(room: Room, playerId: string): RoomResult {
   next.solvedIds = []
   next.artistIds = []
   next.guesses = []
+  next.history = []
   next.feedback = {}
   next.starting = false
   for (const player of next.players) player.score = 0
@@ -338,6 +361,15 @@ export function toView(room: Room, playerId: string): RoomView | null {
     reveal: showReveal,
     artworkUrl,
     guesses: room.phase === 'playing' || room.phase === 'reveal' ? room.guesses : [],
+    recap:
+      room.phase === 'done'
+        ? room.history.map((round) => ({
+            title: round.title,
+            artist: round.artist,
+            storeUrl: round.storeUrl,
+            scores: round.scores.map((score) => ({ ...score })),
+          }))
+        : [],
     lastGuess: room.feedback[playerId] ?? null,
     roundEndsAt: room.phase === 'playing' ? room.roundEndsAt : null,
     starting: room.starting,
