@@ -12,8 +12,9 @@ import {
 import { playlistChoices } from '@/catalog/public'
 import { assertNever } from '@/game/assert-never'
 import { CLIP_CHOICES, DEFAULT_CLIP_SECONDS } from '@/game/constants'
+import { HEARD_STORAGE_KEY, heardIds, storeHeard } from '@/game/heard'
 import { cleanCode, cleanNickname } from '@/game/names'
-import type { ClientMessage, RoomView } from '@/game/protocol'
+import type { ClientMessage, RoomView, SharedGuess } from '@/game/protocol'
 import { standings, winnerText } from '@/game/standings'
 import { ClipPlayer, unlockAudio } from './ClipPlayer'
 import { DoodleField, NoteBand } from './Doodles'
@@ -24,6 +25,16 @@ const NICK_KEY = 'song-guesser-nick'
 export function GameApp() {
   const room = useRoom()
   const phase = room.view?.phase ?? 'home'
+  const revealTrackId = room.view?.reveal?.trackId
+  const playlistId = room.view?.playlistId
+
+  useEffect(() => {
+    if (!revealTrackId || !playlistId) return
+    localStorage.setItem(
+      HEARD_STORAGE_KEY,
+      storeHeard(localStorage.getItem(HEARD_STORAGE_KEY), playlistId, revealTrackId),
+    )
+  }, [playlistId, revealTrackId])
 
   return (
     <div className="stage">
@@ -31,7 +42,7 @@ export function GameApp() {
       <main className="sheet" data-testid="phase" data-phase={phase}>
         <header className="mast">
           <NoteBand />
-          <p className="eyebrow">Hear a clip. Type the title.</p>
+          <p className="eyebrow">Hear a clip. Name the song or the artist.</p>
           <h1>
             Song <DrawablyHighlight seed={4} fill="#f0a202" stroke="#c47b12">Guesser</DrawablyHighlight>
           </h1>
@@ -127,7 +138,7 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
   return (
     <div className="stack">
       <DrawablyCard className="panel panel-lilac" seed={2} stroke="#7b4b94" fill="#7b4b94">
-        <p className="lede">Hear a few seconds. Name the song.</p>
+        <p className="lede">Hear a few seconds. Name the song or the artist.</p>
       </DrawablyCard>
       {localError ? (
         <p className="error" role="alert">
@@ -272,7 +283,10 @@ function Lobby({
             disabled={view.starting}
             onClick={() => {
               unlockAudio()
-              send({ type: 'start' })
+              send({
+                type: 'start',
+                avoidTrackIds: heardIds(localStorage.getItem(HEARD_STORAGE_KEY), view.playlistId),
+              })
             }}
           >
             {view.starting ? 'Finding a song…' : 'Start'}
@@ -302,6 +316,7 @@ function Playing({
   function submit() {
     const text = guess.trim()
     if (!text || youSolved) return
+    setGuess('')
     send({ type: 'guess', text })
   }
 
@@ -312,7 +327,7 @@ function Playing({
         <div className="stack">
           {view.clip ? <ClipPlayer key={view.roundNumber} url={view.clip.previewUrl} seconds={view.clipSeconds} /> : null}
           <p className="quiet">This clip is {view.clipSeconds} seconds, from later in the preview.</p>
-          <p className="quiet">Faster answers score more.</p>
+          <p className="quiet">Faster answers score more. The artist is worth fewer points.</p>
           <p className="quiet" data-testid="courtesy">
             Preview courtesy of iTunes.
           </p>
@@ -337,7 +352,7 @@ function Playing({
         <DrawablyCard className="panel panel-rose" seed={19} stroke="#c44536" fill="#e24b4b">
           <div className="stack">
             <label className="field" htmlFor="guess">
-              Your guess
+              Song or artist
               <DrawablyInput
                 id="guess"
                 data-testid="guess-input"
@@ -573,6 +588,17 @@ function Feedback({ last }: { last: RoomView['lastGuess'] }) {
       </DrawablyCard>
     )
   }
+  if (last.artist) {
+    return (
+      <DrawablyCard className="panel panel-sea" seed={29} stroke="#1f8a70" fill="#1f8a70">
+        <p className="feedback" data-testid="guess-feedback">
+          {last.points > 0
+            ? `That's the artist. ${last.points} points.`
+            : 'You already named the artist.'}
+        </p>
+      </DrawablyCard>
+    )
+  }
   if (last.close) {
     return (
       <DrawablyCard className="panel panel-sun" seed={28} stroke="#c47b12" fill="#f0a202">
@@ -589,6 +615,21 @@ function Feedback({ last }: { last: RoomView['lastGuess'] }) {
   )
 }
 
+function guessTag(kind: SharedGuess['kind'], points: number): string | null {
+  switch (kind) {
+    case 'miss':
+      return null
+    case 'close':
+      return 'Very close'
+    case 'correct':
+      return `${points} points`
+    case 'artist':
+      return points > 0 ? `Artist · ${points}` : 'Already named'
+    default:
+      return assertNever(kind)
+  }
+}
+
 function GuessChat({ view }: { view: RoomView }) {
   const bottomRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -599,14 +640,16 @@ function GuessChat({ view }: { view: RoomView }) {
     <div className="chat" data-testid="guess-chat">
       {view.guesses.length === 0 ? <p className="quiet">No guesses yet.</p> : null}
       <ul>
-        {view.guesses.map((guess) => (
-          <li key={guess.id} className={guess.playerId === view.you.id ? 'you' : undefined} data-kind={guess.kind}>
-            <span className="who">{guess.nickname}</span>
-            <span>{guess.text}</span>
-            {guess.kind === 'close' ? <span className="tag">Very close</span> : null}
-            {guess.kind === 'correct' ? <span className="tag">{guess.points} points</span> : null}
-          </li>
-        ))}
+        {view.guesses.map((guess) => {
+          const tag = guessTag(guess.kind, guess.points)
+          return (
+            <li key={guess.id} className={guess.playerId === view.you.id ? 'you' : undefined} data-kind={guess.kind}>
+              <span className="who">{guess.nickname}</span>
+              <span>{guess.text}</span>
+              {tag ? <span className="tag">{tag}</span> : null}
+            </li>
+          )
+        })}
       </ul>
       <div ref={bottomRef} />
     </div>
@@ -646,6 +689,7 @@ function Scoreboard({ view }: { view: RoomView }) {
           <span className="swatch" aria-hidden="true" />
           {player.nickname} {player.score}
           {player.solved ? ' · got it' : ''}
+          {!player.solved && player.namedArtist ? ' · artist' : ''}
           {!player.connected ? ' · away' : ''}
         </li>
       ))}

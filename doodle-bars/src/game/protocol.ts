@@ -3,6 +3,7 @@ export type Phase = 'lobby' | 'playing' | 'reveal' | 'done'
 export type GuessFeedback = {
   correct: boolean
   close: boolean
+  artist: boolean
   points: number
 }
 
@@ -11,7 +12,7 @@ export type SharedGuess = {
   playerId: string
   nickname: string
   text: string
-  kind: 'miss' | 'close' | 'correct'
+  kind: 'miss' | 'close' | 'correct' | 'artist'
   points: number
 }
 
@@ -30,10 +31,11 @@ export type RoomView = {
     nickname: string
     score: number
     solved: boolean
+    namedArtist: boolean
     connected: boolean
   }[]
   clip: { previewUrl: string } | null
-  reveal: { title: string; artist: string; storeUrl: string } | null
+  reveal: { title: string; artist: string; storeUrl: string; trackId: number } | null
   artworkUrl: string | null
   guesses: SharedGuess[]
   lastGuess: GuessFeedback | null
@@ -52,7 +54,7 @@ export type ClientMessage =
   | { type: 'join'; code: string; nickname: string }
   | { type: 'resume'; code: string; playerId: string }
   | { type: 'configure'; playlistId: string; clipSeconds: number }
-  | { type: 'start' }
+  | { type: 'start'; avoidTrackIds: number[] }
   | { type: 'guess'; text: string }
   | { type: 'next' }
   | { type: 'restart' }
@@ -72,6 +74,19 @@ function readString(value: unknown, max: number): string | null {
   const trimmed = value.trim()
   if (trimmed.length === 0 || trimmed.length > max) return null
   return trimmed
+}
+
+function readTrackIds(value: unknown): number[] {
+  if (!Array.isArray(value)) return []
+  const ids: number[] = []
+  for (const item of value) {
+    if (typeof item !== 'number' || !Number.isInteger(item) || item <= 0) continue
+    const existing = ids.indexOf(item)
+    if (existing >= 0) ids.splice(existing, 1)
+    ids.push(item)
+    if (ids.length > 500) ids.shift()
+  }
+  return ids
 }
 
 export function parseClientMessage(value: unknown): ClientMessage | null {
@@ -109,7 +124,7 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
       return { type: 'configure', playlistId, clipSeconds: value.clipSeconds }
     }
     case 'start':
-      return { type: 'start' }
+      return { type: 'start', avoidTrackIds: readTrackIds(value.avoidTrackIds) }
     case 'guess': {
       const text = readString(value.text, 80)
       if (!text) return null

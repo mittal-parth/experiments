@@ -40,6 +40,32 @@ describe('loadRoundSongs', () => {
     expect(songs[0]?.artworkUrl).toBe('https://is1-ssl.mzstatic.com/image/thumb/1635014240/600x600bb.jpg')
   })
 
+  it('skips songs this player already heard, then repeats the oldest once the pool is used up', async () => {
+    const ids = hindi.songs.map((song) => song.trackId)
+    const heard = ids.slice(0, 10)
+    const skipped = await loadRoundSongs(
+      hindi,
+      { mode: 'fixture', order: 'shuffle' },
+      heard,
+      () => 0.999999999,
+    )
+    expect(skipped.map((song) => song.trackId)).toEqual(ids.slice(10, 15))
+
+    const exhausted = await loadRoundSongs(
+      hindi,
+      { mode: 'fixture', order: 'shuffle' },
+      ids,
+      () => 0.999999999,
+    )
+    expect(exhausted.map((song) => song.trackId)).toEqual(ids.slice(0, 5))
+  })
+
+  it('keeps catalog order even when those songs were heard', async () => {
+    const ids = hindi.songs.map((song) => song.trackId)
+    const songs = await loadRoundSongs(hindi, { mode: 'fixture', order: 'catalog' }, ids, () => 0)
+    expect(songs.map((song) => song.title)).toEqual(hindi.songs.slice(0, 5).map((song) => song.title))
+  })
+
   it('keeps an https cover and drops anything that is not one', () => {
     expect(largerArtwork('https://is1-ssl.mzstatic.com/image/thumb/a/100x100bb.jpg')).toBe(
       'https://is1-ssl.mzstatic.com/image/thumb/a/600x600bb.jpg',

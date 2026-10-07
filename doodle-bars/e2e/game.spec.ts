@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { HEARD_STORAGE_KEY } from '../src/game/heard'
 
 const ROUND_TITLES = ['Kesariya', 'Tum Hi Ho', 'Kal Ho Naa Ho', 'Channa Mereya', 'Apna Bana Le']
 
@@ -81,6 +82,61 @@ test('a room link joins, the timer stops after a correct guess, and the leaderbo
   await hostContext.close()
   await guestContext.close()
 })
+
+test('naming the artist scores fewer points and the revealed song is remembered', async ({ page }) => {
+  const sent: string[] = []
+  page.on('websocket', (ws) => {
+    ws.on('framesent', (frame) => {
+      sent.push(String(frame.payload))
+    })
+  })
+
+  await page.goto('/')
+  await page.getByTestId('nickname').fill('Aman')
+  await page.getByTestId('play-solo').click()
+  await page.getByTestId('playlist').selectOption('hindi')
+  await page.getByTestId('start-game').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+
+  await page.getByTestId('guess-input').fill('Arijit Singh')
+  await page.getByTestId('guess-submit').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+  await expect(page.getByTestId('guess-feedback')).toHaveText(/that's the artist/i)
+  await expect(page.getByTestId('your-score')).toContainText('artist')
+  await expect(page.locator('body')).not.toContainText('Kesariya')
+  const artistScore = scoreOf(await page.getByTestId('your-score').textContent())
+  expect(artistScore).toBeGreaterThan(0)
+
+  await page.getByTestId('guess-input').fill('Kesariya')
+  await page.getByTestId('guess-submit').click()
+  await expect(page.getByTestId('reveal-title')).toHaveText('Kesariya')
+  await expect(page.getByTestId('guess-feedback')).toHaveText(/that's it/i)
+  expect(scoreOf(await page.getByTestId('your-score').textContent())).toBeGreaterThan(artistScore)
+  await expect
+    .poll(() => page.evaluate((key) => localStorage.getItem(key), HEARD_STORAGE_KEY))
+    .toContain('1635014240')
+
+  for (const title of ROUND_TITLES.slice(1)) {
+    await page.getByTestId('next-round').click()
+    await guessTitle(page, title)
+    await expect(page.getByTestId('reveal-title')).toHaveText(title)
+  }
+  await page.getByTestId('next-round').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'done')
+  await page.getByTestId('play-again').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'lobby')
+
+  sent.length = 0
+  await page.getByTestId('start-game').click()
+  await expect
+    .poll(() => sent.some((frame) => frame.includes('"type":"start"') && frame.includes('1635014240')))
+    .toBe(true)
+})
+
+function scoreOf(text: string | null): number {
+  const match = text?.match(/(\d+)/)
+  return match ? Number(match[1]) : 0
+}
 
 async function guessTitle(page: Page, title: string) {
   await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')

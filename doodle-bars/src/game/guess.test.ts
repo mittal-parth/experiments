@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { judgeGuess, matchesAnswer, normalizeAnswer } from './guess'
+import { artistCredits, judgeArtist, judgeGuess, matchesAnswer, normalizeAnswer } from './guess'
 
 describe('normalizeAnswer', () => {
   it('strips movie parentheses, case, and punctuation', () => {
@@ -27,5 +27,23 @@ describe('matchesAnswer', () => {
     expect(judgeGuess('Rabta', 'Raabta')).toBe('correct')
     expect(judgeGuess('tum hi', 'Tum Hi Ho')).toBe('close')
     expect(judgeGuess('nope', 'Kesariya')).toBe('miss')
+  })
+})
+
+describe('judgeArtist', () => {
+  const credit = 'Pritam, Arijit Singh & Amitabh Bhattacharya'
+
+  it('accepts the full credit or one named artist', () => {
+    expect(artistCredits(credit)).toEqual([
+      'Pritam, Arijit Singh & Amitabh Bhattacharya',
+      'Pritam',
+      'Arijit Singh',
+      'Amitabh Bhattacharya',
+    ])
+    expect(judgeArtist('Arijit Singh', credit)).toBe('correct')
+    expect(judgeArtist('pritam', credit)).toBe('correct')
+    expect(judgeArtist(credit, credit)).toBe('correct')
+    expect(judgeArtist('Kesariya', credit)).toBe('miss')
+    expect(judgeArtist('Arijit Si', credit)).toBe('close')
   })
 })

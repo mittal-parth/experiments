@@ -2,6 +2,7 @@ import { request } from 'node:https'
 import type { Playlist, Song } from '@/catalog/types'
 import { ROUNDS_PER_GAME } from '@/game/constants'
 import type { RoundSong } from '@/game/room'
+import { orderAvoidingRecent, type ShuffleRng } from '@/game/shuffle'
 
 export type PreviewMode = 'fixture' | 'live'
 export type SongOrder = 'catalog' | 'shuffle'
@@ -36,22 +37,22 @@ export function previewOptionsFromEnv(): PreviewOptions {
 export async function loadRoundSongs(
   playlist: Playlist,
   options: PreviewOptions,
+  avoidTrackIds: readonly number[] = [],
+  rng: ShuffleRng = Math.random,
 ): Promise<RoundSong[]> {
-  const ordered = orderSongs(playlist.songs, options.order)
+  const ordered = orderSongs(playlist.songs, options.order, avoidTrackIds, rng)
   const resolved = await resolvePreviews(ordered, playlist.storefront, options)
   return resolved.slice(0, ROUNDS_PER_GAME)
 }
 
-export function orderSongs<T>(songs: readonly T[], order: SongOrder): T[] {
-  const copy = [...songs]
-  if (order === 'catalog') return copy
-  for (let index = copy.length - 1; index > 0; index -= 1) {
-    const swap = Math.floor(Math.random() * (index + 1))
-    const current = copy[index]
-    copy[index] = copy[swap]
-    copy[swap] = current
-  }
-  return copy
+export function orderSongs<T extends { trackId: number }>(
+  songs: readonly T[],
+  order: SongOrder,
+  avoidTrackIds: readonly number[] = [],
+  rng: ShuffleRng = Math.random,
+): T[] {
+  if (order === 'catalog') return [...songs]
+  return orderAvoidingRecent(songs, avoidTrackIds, ROUNDS_PER_GAME, rng)
 }
 
 async function resolvePreviews(

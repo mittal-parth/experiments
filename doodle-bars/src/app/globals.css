@@ -317,6 +317,8 @@ button, input, select { font: inherit; }
 
 .chat li[data-kind="correct"] .tag { color: var(--leaf); }
 
+.chat li[data-kind="artist"] .tag { color: var(--teal); }
+
 .cover {
   display: block;
   width: 11rem;
