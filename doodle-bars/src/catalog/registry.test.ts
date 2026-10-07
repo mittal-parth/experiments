@@ -25,6 +25,8 @@ describe('playlist registry', () => {
     expect(getPlaylist('punjabi')?.songs.length).toBeGreaterThan(90)
     expect(getPlaylist('english-pop')?.songs.length).toBeGreaterThan(50)
     expect(getPlaylist('english-classics')?.songs.length).toBeGreaterThan(20)
+    expect(getPlaylist('michael-jackson')?.songs.length).toBeGreaterThan(40)
+    expect(getPlaylist('michael-jackson')?.songs[0]?.title).toBe('Billie Jean')
     const unique = new Set(listPlaylists().flatMap((playlist) => playlist.songs.map((song) => song.trackId)))
     expect(unique.size).toBeGreaterThan(300)
   })

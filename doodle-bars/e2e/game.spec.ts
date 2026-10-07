@@ -5,6 +5,7 @@ const ROUND_TITLES = ['Kesariya', 'Tum Hi Ho', 'Kal Ho Naa Ho', 'Channa Mereya',
 test('solo hindi round starts the clip and accepts a near spelling', async ({ page }) => {
   await page.goto('/')
   await page.getByTestId('nickname').fill('Aman')
+  await expect(page.getByTestId('playlist').locator('option[value="michael-jackson"]')).toHaveText('Michael Jackson')
   await page.getByTestId('play-solo').click()
   await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'lobby')
   await page.getByTestId('playlist').selectOption('hindi')
