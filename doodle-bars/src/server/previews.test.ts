@@ -13,6 +13,18 @@ describe('loadRoundSongs', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
     expect(songs).toHaveLength(5)
     expect(songs[0]?.title).toBe('Kesariya')
+    const short = await loadRoundSongs(hindi, {
+      mode: 'fixture',
+      order: 'catalog',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }, 3)
+    expect(short).toHaveLength(3)
+    const capped = await loadRoundSongs(hindi, {
+      mode: 'fixture',
+      order: 'catalog',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }, 100)
+    expect(capped).toHaveLength(20)
     expect(songs[0]?.previewUrl).toBe('/api/fixture-tone')
     expect(songs[0]?.artworkUrl).toBe('/fixture-cover.svg')
     expect(songs[0]?.storeUrl).toContain('music.apple.com')

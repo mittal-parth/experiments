@@ -1,4 +1,5 @@
 import 'server-only'
+import { englishClassics } from './playlists/english-classics'
 import { englishPop } from './playlists/english-pop'
 import { hindi, hindiClassics, hindiParty, hindiRomance, hindiSufi } from './playlists/hindi'
 import { punjabi } from './playlists/punjabi'
@@ -13,6 +14,7 @@ const playlists: readonly Playlist[] = [
   hindiSufi,
   punjabi,
   englishPop,
+  englishClassics,
 ]
 
 export function listPlaylists(): readonly Playlist[] {

@@ -77,9 +77,45 @@ test('a room link joins, the timer stops after a correct guess, and the leaderbo
   await expect(host.getByTestId('winner')).toHaveText('Riya wins')
   await expect(host.getByTestId('leaderboard')).toContainText('Riya')
   await expect(guest.getByTestId('winner')).toHaveText('Riya wins')
+  await expect(host.getByTestId('setlist-guessed')).toContainText('Kesariya')
+  await expect(host.getByTestId('setlist-guessed')).toContainText('Apna Bana Le')
+  await expect(host.getByTestId('setlist-missed')).toHaveText('None')
+  await expect(guest.getByTestId('setlist-guessed')).toContainText('Riya')
+  await expect(guest.getByTestId('personal-best')).toHaveText(/Best across games: [1-9]/)
 
   await hostContext.close()
   await guestContext.close()
+})
+
+test('the host can choose how many songs, then the recap and best score stick', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('nickname').fill('Aman')
+  await page.getByTestId('rounds-3').click()
+  await expect(page.getByTestId('rounds-5')).toHaveCSS('color', 'rgb(36, 28, 22)')
+  await page.getByTestId('play-solo').click()
+  await expect(page.getByTestId('rounds-3')).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('start-game').click()
+  await expect(page.getByText('Round 1 of 3')).toBeVisible()
+
+  for (const title of ROUND_TITLES.slice(0, 3)) {
+    await guessTitle(page, title)
+    await expect(page.getByTestId('reveal-title')).toHaveText(title)
+    await page.getByTestId('next-round').click()
+  }
+
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'done')
+  await expect(page.getByTestId('setlist-guessed')).toContainText('Kal Ho Naa Ho')
+  await expect(page.getByTestId('setlist-missed')).toHaveText('None')
+  const best = page.getByTestId('personal-best')
+  await expect(best).toHaveText(/Best across games: [1-9]/)
+  const bestText = await best.textContent()
+
+  await page.getByTestId('play-again').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'lobby')
+  await expect(page.getByTestId('personal-best')).toHaveText(bestText ?? '')
+  await page.getByTestId('leave').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'home')
+  await expect(page.getByTestId('personal-best')).toHaveText(bestText ?? '')
 })
 
 async function guessTitle(page: Page, title: string) {

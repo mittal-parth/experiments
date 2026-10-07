@@ -1,7 +1,8 @@
 import { MAX_PLAYERS } from './constants'
 import { clampClipSeconds } from './clip'
 import { judgeGuess } from './guess'
-import type { GuessFeedback, RoomView, SharedGuess } from './protocol'
+import type { GuessFeedback, RoomView, SetlistEntry, SharedGuess } from './protocol'
+import { clampRoundCount } from './rounds'
 import { pointsForGuess, roundDurationMs } from './score'
 
 export type RoundSong = {
@@ -28,6 +29,7 @@ export type Room = {
   playlistId: string
   playlistName: string
   clipSeconds: number
+  roundCount: number
   players: Player[]
   phase: RoomView['phase']
   roundIndex: number
@@ -37,6 +39,7 @@ export type Room = {
   solvedIds: string[]
   guesses: SharedGuess[]
   feedback: Record<string, GuessFeedback>
+  history: SetlistEntry[]
   starting: boolean
 }
 
@@ -49,6 +52,7 @@ export function createRoom(input: {
   playlistId: string
   playlistName: string
   clipSeconds: number
+  roundCount: number
   mode: 'solo' | 'room'
 }): Room {
   return {
@@ -58,6 +62,7 @@ export function createRoom(input: {
     playlistId: input.playlistId,
     playlistName: input.playlistName,
     clipSeconds: clampClipSeconds(input.clipSeconds),
+    roundCount: clampRoundCount(input.roundCount),
     players: [
       { id: input.hostId, nickname: input.nickname, score: 0, connected: true },
     ],
@@ -69,6 +74,7 @@ export function createRoom(input: {
     solvedIds: [],
     guesses: [],
     feedback: {},
+    history: [],
     starting: false,
   }
 }
@@ -96,6 +102,7 @@ export function configureRoom(
   playlistId: string,
   playlistName: string,
   clipSeconds: number,
+  roundCount: number,
 ): RoomResult {
   if (room.hostId !== playerId) return { ok: false, error: 'Only the host can do that' }
   if (room.phase !== 'lobby' || room.starting) {
@@ -105,6 +112,7 @@ export function configureRoom(
   next.playlistId = playlistId
   next.playlistName = playlistName
   next.clipSeconds = clampClipSeconds(clipSeconds)
+  next.roundCount = clampRoundCount(roundCount)
   return { ok: true, room: next }
 }
 
@@ -140,6 +148,7 @@ export function beginGame(
   next.solvedIds = []
   next.guesses = []
   next.feedback = {}
+  next.history = []
   const duration = roundDurationMs(next.clipSeconds, graceSeconds)
   next.roundStartedAt = now
   next.roundEndsAt = now + duration
@@ -178,6 +187,21 @@ export function submitGuess(room: Room, playerId: string, text: string, now: num
   next.feedback[playerId] = { correct: true, close: false, points }
   next.guesses.push(guessNote(next, player, text, 'correct', points))
   return { ok: true, room: syncPhase(next, now) }
+}
+
+function playedEntry(room: Room): SetlistEntry | null {
+  const song = room.songs[room.roundIndex]
+  if (!song) return null
+  const guessedBy = room.players
+    .filter((player) => room.solvedIds.includes(player.id))
+    .map((player) => player.nickname)
+  return {
+    title: song.title,
+    artist: song.artist,
+    storeUrl: song.storeUrl,
+    guessed: guessedBy.length > 0,
+    guessedBy,
+  }
 }
 
 function guessNote(
@@ -223,6 +247,8 @@ export function advance(
   if (room.hostId !== playerId) return { ok: false, error: 'Only the host can do that' }
   if (room.phase !== 'reveal') return { ok: false, error: 'Wait for the reveal' }
   const next = structuredClone(room)
+  const entry = playedEntry(next)
+  if (entry) next.history.push(entry)
   const upcoming = room.roundIndex + 1
   if (upcoming >= room.songs.length) {
     next.phase = 'done'
@@ -251,6 +277,7 @@ export function restart(room: Room, playerId: string): RoomResult {
   next.solvedIds = []
   next.guesses = []
   next.feedback = {}
+  next.history = []
   next.starting = false
   for (const player of next.players) player.score = 0
   return { ok: true, room: next }
@@ -299,8 +326,10 @@ export function toView(room: Room, playerId: string): RoomView | null {
     playlistId: room.playlistId,
     playlistName: room.playlistName,
     clipSeconds: room.clipSeconds,
+    roundCount: room.roundCount,
     roundNumber: room.roundIndex >= 0 ? room.roundIndex + 1 : 0,
     totalRounds: room.songs.length,
+    setlist: room.phase === 'done' ? room.history : [],
     you: { id: you.id, isHost: room.hostId === you.id, nickname: you.nickname },
     players: room.players.map((player) => ({
       id: player.id,

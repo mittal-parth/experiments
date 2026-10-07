@@ -17,11 +17,15 @@ describe('playlist registry', () => {
     }
     const hindiSongs = getPlaylist('hindi')?.songs ?? []
     expect(hindiSongs[0]?.title).toBe('Kesariya')
-    expect(hindiSongs.length).toBeGreaterThan(70)
+    expect(hindiSongs.length).toBeGreaterThan(120)
     expect(getPlaylist('hindi-romance')?.songs.length).toBeGreaterThan(20)
     expect(getPlaylist('hindi-party')?.songs.length).toBeGreaterThan(15)
     expect(getPlaylist('hindi-classics')?.songs.length).toBeGreaterThan(10)
     expect(getPlaylist('hindi-sufi')?.songs.length).toBeGreaterThan(8)
-    expect(getPlaylist('punjabi')?.songs.length).toBeGreaterThan(40)
+    expect(getPlaylist('punjabi')?.songs.length).toBeGreaterThan(90)
+    expect(getPlaylist('english-pop')?.songs.length).toBeGreaterThan(50)
+    expect(getPlaylist('english-classics')?.songs.length).toBeGreaterThan(20)
+    const unique = new Set(listPlaylists().flatMap((playlist) => playlist.songs.map((song) => song.trackId)))
+    expect(unique.size).toBeGreaterThan(300)
   })
 })
