@@ -1,4 +1,7 @@
-export const ROUNDS_PER_GAME = 5
+export const DEFAULT_ROUNDS = 5
+export const MIN_ROUNDS = 1
+export const MAX_ROUNDS = 20
+export const ROUND_CHOICES = [3, 5, 8, 10, 15, 20] as const
 export const MAX_PLAYERS = 8
 export const MIN_CLIP_SECONDS = 1
 export const MAX_CLIP_SECONDS = 15

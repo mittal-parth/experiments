@@ -1,6 +1,7 @@
 import { request } from 'node:https'
 import type { Playlist, Song } from '@/catalog/types'
-import { ROUNDS_PER_GAME } from '@/game/constants'
+import { DEFAULT_ROUNDS } from '@/game/constants'
+import { clampRoundCount } from '@/game/rounds'
 import type { RoundSong } from '@/game/room'
 
 export type PreviewMode = 'fixture' | 'live'
@@ -36,10 +37,11 @@ export function previewOptionsFromEnv(): PreviewOptions {
 export async function loadRoundSongs(
   playlist: Playlist,
   options: PreviewOptions,
+  roundCount = DEFAULT_ROUNDS,
 ): Promise<RoundSong[]> {
   const ordered = orderSongs(playlist.songs, options.order)
   const resolved = await resolvePreviews(ordered, playlist.storefront, options)
-  return resolved.slice(0, ROUNDS_PER_GAME)
+  return resolved.slice(0, clampRoundCount(roundCount))
 }
 
 export function orderSongs<T>(songs: readonly T[], order: SongOrder): T[] {

@@ -1,4 +1,14 @@
+import { DEFAULT_ROUNDS } from './constants'
+
 export type Phase = 'lobby' | 'playing' | 'reveal' | 'done'
+
+export type SetlistEntry = {
+  title: string
+  artist: string
+  storeUrl: string
+  guessed: boolean
+  guessedBy: string[]
+}
 
 export type GuessFeedback = {
   correct: boolean
@@ -22,8 +32,10 @@ export type RoomView = {
   playlistId: string
   playlistName: string
   clipSeconds: number
+  roundCount: number
   roundNumber: number
   totalRounds: number
+  setlist: SetlistEntry[]
   you: { id: string; isHost: boolean; nickname: string }
   players: {
     id: string
@@ -47,11 +59,12 @@ export type ClientMessage =
       nickname: string
       playlistId: string
       clipSeconds: number
+      roundCount: number
       mode: 'solo' | 'room'
     }
   | { type: 'join'; code: string; nickname: string }
   | { type: 'resume'; code: string; playerId: string }
-  | { type: 'configure'; playlistId: string; clipSeconds: number }
+  | { type: 'configure'; playlistId: string; clipSeconds: number; roundCount: number }
   | { type: 'start' }
   | { type: 'guess'; text: string }
   | { type: 'next' }
@@ -88,6 +101,7 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
         nickname,
         playlistId,
         clipSeconds: value.clipSeconds,
+        roundCount: readRoundCount(value.roundCount),
         mode: value.mode,
       }
     }
@@ -106,7 +120,12 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
     case 'configure': {
       const playlistId = readString(value.playlistId, 40)
       if (!playlistId || typeof value.clipSeconds !== 'number') return null
-      return { type: 'configure', playlistId, clipSeconds: value.clipSeconds }
+      return {
+        type: 'configure',
+        playlistId,
+        clipSeconds: value.clipSeconds,
+        roundCount: readRoundCount(value.roundCount),
+      }
     }
     case 'start':
       return { type: 'start' }
@@ -143,6 +162,10 @@ export function parseServerMessage(value: unknown): ServerMessage | null {
     default:
       return null
   }
+}
+
+function readRoundCount(value: unknown): number {
+  return typeof value === 'number' ? value : DEFAULT_ROUNDS
 }
 
 function safeJson(value: string): unknown {

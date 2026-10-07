@@ -40,4 +40,14 @@ export const playlistChoices: readonly PlaylistChoice[] = [
     name: 'English pop',
     description: 'Pop songs.',
   },
+  {
+    id: 'english-classics',
+    name: 'English classics',
+    description: 'Older hits.',
+  },
+  {
+    id: 'michael-jackson',
+    name: 'Michael Jackson',
+    description: 'MJ songs.',
+  },
 ]

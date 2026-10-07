@@ -1,6 +1,6 @@
 # Song Guesser
 
-Hear a few seconds of a song and name it. Host a room and send the link. The room code is in the URL.
+Hear a few seconds of a song and name it. Host a room and send the link. The room code is in the URL. The host picks the playlist, the clip length, and how many songs are in the game.
 
 Set the Vercel project root to `doodle-bars`. WebSockets use Fluid compute (`experimental_upgradeWebSocket` on `/api/ws`). Locally, `npm run dev` attaches the same hub with the `ws` package, because that upgrade helper does not run under `next dev`.
 
