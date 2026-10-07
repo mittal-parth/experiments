@@ -1,0 +1,64 @@
+:root {
+  --drawably-stroke: #1c1915;
+  --drawably-fill: #1c1915;
+  --drawably-paper: #f4efe4;
+  color: #1c1915;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(28, 25, 21, 0.05) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 80% 10%, rgba(47, 93, 159, 0.08), transparent 28%),
+    #f4efe4;
+  background-size: 18px 18px, auto, auto;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: #1c1915;
+  font-family: "Drawably Pen", "Segoe Print", ui-sans-serif, system-ui, sans-serif;
+}
+
+h1, h2 { font-weight: 400; line-height: 1.1; margin: 0; }
+
+h1 { font-size: 3rem; }
+
+a { color: #2f5d9f; }
+
+button, input, select { font: inherit; }
+
+.sheet {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.25rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+}
+
+.stack { display: flex; flex-direction: column; gap: 1rem; }
+.stack.tight { gap: 0.4rem; }
+.row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+
+.field { display: flex; flex-direction: column; gap: 0.35rem; }
+
+.field input,
+.field select {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 1rem;
+  color: inherit;
+  background: transparent;
+}
+
+.quiet { margin: 0; opacity: 0.75; }
+.error { margin: 0; color: #9b2226; }
+.code { margin: 0; font-size: 2.4rem; letter-spacing: 0.18em; }
+.card { padding: 1rem 1.1rem; }
+.scores { margin: 0; padding-left: 1.2rem; }
+.clip { display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-start; }

@@ -1,0 +1,62 @@
+import { expect, test } from '@playwright/test'
+
+test('solo hindi round hides the title until the guess is right', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('nickname').fill('Aman')
+  await page.getByTestId('play-solo').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'lobby')
+  await page.getByTestId('playlist').selectOption('hindi')
+  await page.getByTestId('clip-3').click()
+  await page.getByTestId('start-game').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+  await expect(page.locator('body')).not.toContainText('Kesariya')
+  await page.getByTestId('play-clip').click()
+  await expect(page.getByTestId('clip-status')).toHaveText('playing')
+  await page.getByTestId('guess-input').fill('nope')
+  await page.getByTestId('guess-submit').click()
+  await expect(page.getByTestId('guess-feedback')).toHaveText(/not quite/i)
+  await expect(page.locator('body')).not.toContainText('Kesariya')
+  await page.getByTestId('guess-input').fill('Kesariya')
+  await page.getByTestId('guess-submit').click()
+  await expect(page.getByTestId('reveal-title')).toHaveText('Kesariya')
+  await expect(page.getByTestId('your-score')).not.toHaveText(/Aman 0/)
+  await expect(page.getByTestId('reveal-link')).toHaveAttribute('href', /music\.apple\.com/)
+  await expect(page.getByTestId('courtesy')).toContainText(/iTunes/i)
+})
+
+test('a guest can join a room and both scoreboards update', async ({ browser }) => {
+  const hostContext = await browser.newContext()
+  const guestContext = await browser.newContext()
+  const host = await hostContext.newPage()
+  const guest = await guestContext.newPage()
+
+  await host.goto('/')
+  await host.getByTestId('nickname').fill('Aman')
+  await host.getByTestId('host-room').click()
+  await expect(host.getByTestId('room-code')).toHaveText(/^[A-Z0-9]{4}$/)
+  const code = (await host.getByTestId('room-code').textContent())?.trim() ?? ''
+
+  await guest.goto('/')
+  await guest.getByTestId('nickname').fill('Riya')
+  await guest.getByTestId('join-code').fill(code)
+  await guest.getByTestId('join-room').click()
+  await expect(guest.getByTestId('scoreboard')).toContainText('Aman')
+  await expect(host.getByTestId('scoreboard')).toContainText('Riya')
+
+  await host.getByTestId('start-game').click()
+  await expect(guest.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+  await expect(guest.locator('body')).not.toContainText('Kesariya')
+  await guest.getByTestId('guess-input').fill('Kesariya')
+  await guest.getByTestId('guess-submit').click()
+  await expect(guest.getByTestId('guess-feedback')).toHaveText(/that's it/i)
+  await expect(host.getByTestId('scoreboard')).toContainText(/Riya [1-9]/)
+  await expect(host.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+
+  await host.getByTestId('guess-input').fill('Kesariya')
+  await host.getByTestId('guess-submit').click()
+  await expect(host.getByTestId('reveal-title')).toHaveText('Kesariya')
+  await expect(guest.getByTestId('reveal-title')).toHaveText('Kesariya')
+
+  await hostContext.close()
+  await guestContext.close()
+})
