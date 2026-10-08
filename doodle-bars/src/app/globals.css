@@ -227,7 +227,7 @@ button, input, select { font: inherit; }
 
 .join-row .field { flex: 1 1 12rem; }
 
-.pips { display: flex; gap: 0.45rem; }
+.pips { display: flex; flex-wrap: wrap; gap: 0.45rem; }
 
 .pips span {
   width: 0.85rem;
@@ -328,6 +328,48 @@ button, input, select { font: inherit; }
   box-shadow: 0 0 0 3px var(--ink);
 }
 
+.best-line {
+  margin: 0.35rem 0 0;
+  color: var(--grape);
+  font-size: 1.2rem;
+}
+
+.setlist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.setlist h3 {
+  margin: 0;
+  font-size: 1.45rem;
+}
+
+.setlist ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.setlist li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: baseline;
+  margin: 0;
+  padding: 0.45rem 0.7rem;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+
+.setlist li.hit { background: var(--sea); }
+.setlist li.miss { background: var(--rose); }
+.setlist .who { color: var(--teal); }
+.setlist .title-link { color: inherit; }
+
 .winner-line {
   margin: 0;
   font-size: 2rem;
@@ -368,7 +410,8 @@ button, input, select { font: inherit; }
   font-weight: 400;
 }
 
-.recap {
+.recap,
+.setlist .recap {
   list-style: none;
   margin: 0;
   padding: 0;

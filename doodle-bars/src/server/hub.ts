@@ -140,6 +140,7 @@ function onCreate(client: Client, message: Extract<ClientMessage, { type: 'creat
     playlistId: playlist.id,
     playlistName: playlist.name,
     clipSeconds: message.clipSeconds,
+    roundCount: message.roundCount,
     mode: message.mode,
   })
   rooms.set(room.code, room)
@@ -205,6 +206,7 @@ function onConfigure(
     playlist.id,
     playlist.name,
     message.clipSeconds,
+    message.roundCount,
   )
   if (!configured.ok) {
     fail(client, configured.error)
@@ -232,7 +234,12 @@ async function onStart(client: Client, avoidTrackIds: readonly number[]): Promis
     return
   }
   try {
-    const songs = await loadRoundSongs(playlist, previewOptionsFromEnv(), avoidTrackIds)
+    const songs = await loadRoundSongs(
+      playlist,
+      previewOptionsFromEnv(),
+      marked.room.roundCount,
+      avoidTrackIds,
+    )
     const current = rooms.get(located.room.code)
     if (!current || !current.starting) return
     if (songs.length === 0) {

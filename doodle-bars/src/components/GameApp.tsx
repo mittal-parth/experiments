@@ -11,7 +11,8 @@ import {
 } from 'drawably/react'
 import { playlistChoices } from '@/catalog/public'
 import { assertNever } from '@/game/assert-never'
-import { CLIP_CHOICES, DEFAULT_CLIP_SECONDS } from '@/game/constants'
+import { BEST_KEY, bestScore, readStoredBest, withBest, type BestBoard } from '@/game/best'
+import { CLIP_CHOICES, DEFAULT_CLIP_SECONDS, DEFAULT_ROUNDS, ROUND_CHOICES } from '@/game/constants'
 import { HEARD_STORAGE_KEY, heardIds, storeHeard } from '@/game/heard'
 import { cleanCode, cleanNickname } from '@/game/names'
 import type { ClientMessage, RoomView, SharedGuess } from '@/game/protocol'
@@ -27,6 +28,11 @@ export function GameApp() {
   const phase = room.view?.phase ?? 'home'
   const revealTrackId = room.view?.reveal?.trackId
   const playlistId = room.view?.playlistId
+  const youId = room.view?.you.id
+  const finishedScore =
+    room.view?.phase === 'done'
+      ? (room.view.players.find((player) => player.id === youId)?.score ?? null)
+      : null
 
   useEffect(() => {
     if (!revealTrackId || !playlistId) return
@@ -46,6 +52,9 @@ export function GameApp() {
           <h1>
             Song <DrawablyHighlight seed={4} fill="#f0a202" stroke="#c47b12">Guesser</DrawablyHighlight>
           </h1>
+          {room.view ? (
+            <PersonalBest nickname={room.view.you.nickname} pendingScore={finishedScore} />
+          ) : null}
         </header>
         {room.error ? (
           <p className="error" data-testid="error" role="alert">
@@ -91,6 +100,7 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
   const [nickname, setNickname] = useState('')
   const [playlistId, setPlaylistId] = useState<string>(playlistChoices[0]?.id ?? 'hindi')
   const [clipSeconds, setClipSeconds] = useState(DEFAULT_CLIP_SECONDS)
+  const [roundCount, setRoundCount] = useState(DEFAULT_ROUNDS)
   const [code, setCode] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
 
@@ -120,7 +130,7 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
     const nick = nickOrWarn()
     if (!nick) return
     unlockAudio()
-    send({ type: 'create', nickname: nick, playlistId, clipSeconds, mode })
+    send({ type: 'create', nickname: nick, playlistId, clipSeconds, roundCount, mode })
   }
 
   function join() {
@@ -164,6 +174,8 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
           </label>
           <PlaylistField playlistId={playlistId} onChange={setPlaylistId} />
           <ClipField seconds={clipSeconds} onChange={setClipSeconds} />
+          <RoundField count={roundCount} onChange={setRoundCount} />
+          <PersonalBest nickname={nickname} pendingScore={null} />
         </div>
       </DrawablyCard>
       <div className="row actions">
@@ -257,14 +269,36 @@ function Lobby({
             playlistId={view.playlistId}
             disabled={!view.you.isHost || view.starting}
             onChange={(playlistId) => {
-              send({ type: 'configure', playlistId, clipSeconds: view.clipSeconds })
+              send({
+                type: 'configure',
+                playlistId,
+                clipSeconds: view.clipSeconds,
+                roundCount: view.roundCount,
+              })
             }}
           />
           <ClipField
             seconds={view.clipSeconds}
             disabled={!view.you.isHost || view.starting}
             onChange={(clipSeconds) => {
-              send({ type: 'configure', playlistId: view.playlistId, clipSeconds })
+              send({
+                type: 'configure',
+                playlistId: view.playlistId,
+                clipSeconds,
+                roundCount: view.roundCount,
+              })
+            }}
+          />
+          <RoundField
+            count={view.roundCount}
+            disabled={!view.you.isHost || view.starting}
+            onChange={(roundCount) => {
+              send({
+                type: 'configure',
+                playlistId: view.playlistId,
+                clipSeconds: view.clipSeconds,
+                roundCount,
+              })
             }}
           />
           <Scoreboard view={view} />
@@ -294,7 +328,7 @@ function Lobby({
         ) : (
           <p className="quiet">Waiting for the host.</p>
         )}
-        <DrawablyButton type="button" onClick={leave}>
+        <DrawablyButton type="button" data-testid="leave" onClick={leave}>
           Leave
         </DrawablyButton>
       </div>
@@ -450,8 +484,6 @@ function Done({
 }) {
   const ranked = standings(view.players)
   const headline = winnerText(view.players)
-  const guessed = view.recap.filter((round) => round.scores.some((score) => score.kind === 'correct'))
-  const missed = view.recap.filter((round) => !round.scores.some((score) => score.kind === 'correct'))
   return (
     <div className="stack">
       <h2>Final scores</h2>
@@ -464,6 +496,7 @@ function Done({
           You scored {view.players[0]?.score ?? 0}
         </p>
       )}
+      <Cover url={view.artworkUrl} />
       <ol className="leaderboard" data-testid="leaderboard">
         {ranked.map((player) => (
           <li key={player.id} className={player.id === view.you.id ? 'you' : undefined}>
@@ -473,8 +506,7 @@ function Done({
           </li>
         ))}
       </ol>
-      <SongRecap heading="Guessed" countTestId="guessed-count" rounds={guessed} />
-      <SongRecap heading="Not guessed" rounds={missed} />
+      <Setlist rounds={view.recap} />
       <div className="row">
         {view.you.isHost ? (
           <DrawablyButton
@@ -493,68 +525,11 @@ function Done({
         ) : (
           <p className="quiet">Waiting for the host.</p>
         )}
-        <DrawablyButton type="button" onClick={leave}>
+        <DrawablyButton type="button" data-testid="leave" onClick={leave}>
           Leave
         </DrawablyButton>
       </div>
     </div>
-  )
-}
-
-function SongRecap({
-  heading,
-  rounds,
-  countTestId,
-}: {
-  heading: string
-  rounds: RoomView['recap']
-  countTestId?: string
-}) {
-  if (rounds.length === 0 && heading !== 'Guessed') return null
-  return (
-    <section className="stack tight">
-      <h3 className="recap-heading" data-testid={countTestId}>
-        {heading} {rounds.length}
-      </h3>
-      {rounds.length > 0 ? (
-        <ul className="recap" data-testid={heading === 'Guessed' ? 'recap' : 'recap-missed'}>
-          {rounds.map((round) => {
-            const solved = round.scores.some((score) => score.kind === 'correct')
-            const tone = [solved ? 'hit' : 'miss', round.scores.length > 0 ? 'scored' : ''].filter(Boolean).join(' ')
-            return (
-              <li key={`${round.storeUrl}-${round.title}`} className={tone}>
-                <div className="recap-copy">
-                  <p className="recap-title">{round.title}</p>
-                  <p className="recap-artist">{round.artist}</p>
-                </div>
-                <a
-                  className="store-icon"
-                  href={round.storeUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={`Listen to ${round.title} on Apple Music`}
-                >
-                  <LinkIcon />
-                </a>
-                {round.scores.length > 0 ? (
-                  <ul className="recap-scores">
-                    {round.scores.map((score, index) => (
-                      <li key={`${score.nickname}-${score.kind}-${index}`} data-kind={score.kind}>
-                        <span className="recap-who">{score.nickname}</span>
-                        <span className="recap-pts" data-testid="recap-points">
-                          {score.points}
-                          {score.kind === 'artist' ? <span className="recap-kind"> artist</span> : null}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </li>
-            )
-          })}
-        </ul>
-      ) : null}
-    </section>
   )
 }
 
@@ -601,6 +576,43 @@ function PlaylistField({
         {playlistChoices.find((choice) => choice.id === playlistId)?.description}
       </span>
     </label>
+  )
+}
+
+function RoundField({
+  count,
+  onChange,
+  disabled = false,
+}: {
+  count: number
+  onChange: (count: number) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="stack tight">
+      <span>Songs</span>
+      <div className="row clip-choices">
+        {ROUND_CHOICES.map((choice) => (
+          <DrawablyButton
+            key={choice}
+            type="button"
+            data-testid={`rounds-${choice}`}
+            seed={40 + choice}
+            variant={choice === count ? 'solid' : 'outline'}
+            fill={choice === count ? '#7b4b94' : '#fff6ea'}
+            paper={choice === count ? '#fffaf5' : '#241c16'}
+            stroke="#7b4b94"
+            disabled={disabled}
+            aria-pressed={choice === count}
+            onClick={() => {
+              onChange(choice)
+            }}
+          >
+            {choice}
+          </DrawablyButton>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -736,6 +748,104 @@ function RoomLink({ code }: { code: string }) {
       Send this page. The code is in the link.
       <br />
       {link}
+    </p>
+  )
+}
+
+function Setlist({ rounds }: { rounds: RoomView['recap'] }) {
+  const guessed = rounds.filter((round) => round.scores.some((score) => score.kind === 'correct'))
+  const missed = rounds.filter((round) => !round.scores.some((score) => score.kind === 'correct'))
+  return (
+    <div className="setlist" data-testid="setlist">
+      <section className="stack tight">
+        <h3 className="recap-heading" data-testid="guessed-count">
+          Guessed {guessed.length}
+        </h3>
+        <RoundList rounds={guessed} testId="setlist-guessed" />
+      </section>
+      <section className="stack tight">
+        <h3 className="recap-heading">Not guessed {missed.length}</h3>
+        <RoundList rounds={missed} testId="setlist-missed" />
+      </section>
+    </div>
+  )
+}
+
+function RoundList({ rounds, testId }: { rounds: RoomView['recap']; testId: string }) {
+  if (rounds.length === 0) {
+    return (
+      <p className="quiet" data-testid={testId}>
+        None
+      </p>
+    )
+  }
+  return (
+    <ul className="recap" data-testid={testId}>
+      {rounds.map((round) => {
+        const solved = round.scores.some((score) => score.kind === 'correct')
+        const tone = [solved ? 'hit' : 'miss', round.scores.length > 0 ? 'scored' : ''].filter(Boolean).join(' ')
+        return (
+          <li key={`${round.storeUrl}-${round.title}`} className={tone}>
+            <div className="recap-copy">
+              <p className="recap-title">{round.title}</p>
+              <p className="recap-artist">{round.artist}</p>
+            </div>
+            <a
+              className="store-icon"
+              href={round.storeUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Listen to ${round.title} on Apple Music`}
+            >
+              <LinkIcon />
+            </a>
+            {round.scores.length > 0 ? (
+              <ul className="recap-scores">
+                {round.scores.map((score, index) => (
+                  <li key={`${score.nickname}-${score.kind}-${index}`} data-kind={score.kind}>
+                    <span className="recap-who who">{score.nickname}</span>
+                    <span className="recap-pts" data-testid="recap-points">
+                      {score.points}
+                      {score.kind === 'artist' ? <span className="recap-kind"> artist</span> : null}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+function PersonalBest({
+  nickname,
+  pendingScore,
+}: {
+  nickname: string
+  pendingScore: number | null
+}) {
+  const [board, setBoard] = useState<BestBoard>({})
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    const stored = readStoredBest(localStorage.getItem(BEST_KEY))
+    const next = pendingScore === null ? stored : withBest(stored, nickname, pendingScore)
+    if (next !== stored) localStorage.setItem(BEST_KEY, JSON.stringify(next))
+    setBoard(next)
+    setReady(true)
+  }, [nickname, pendingScore])
+
+  const shown = bestScore(
+    pendingScore === null ? board : withBest(board, nickname, pendingScore),
+    nickname,
+  )
+  if (!ready && pendingScore === null) return null
+  if (shown <= 0) return null
+  return (
+    <p className="best-line" data-testid="personal-best">
+      Best across games: {shown}
     </p>
   )
 }

@@ -20,6 +20,7 @@ function lobby() {
     playlistId: 'hindi',
     playlistName: 'Hindi',
     clipSeconds: 5,
+    roundCount: 5,
     mode: 'room',
   })
 }
@@ -35,7 +36,13 @@ describe('room', () => {
     })
     const withGuest = joinRoom(room, { id: 'guest', nickname: 'Riya' })
     if (!withGuest.ok) throw new Error('expected join')
-    expect(configureRoom(withGuest.room, 'guest', 'english-pop', 'English pop', 3).ok).toBe(false)
+    expect(configureRoom(withGuest.room, 'guest', 'english-pop', 'English pop', 3, 8).ok).toBe(false)
+    const configured = configureRoom(room, 'host', 'english-pop', 'English pop', 3, 8)
+    if (!configured.ok) throw new Error('expected configure')
+    expect(configured.room.roundCount).toBe(8)
+    const capped = configureRoom(room, 'host', 'hindi', 'Hindi', 5, 100)
+    if (!capped.ok) throw new Error('expected cap')
+    expect(capped.room.roundCount).toBe(20)
   })
 
   it('hides the title while playing, then reveals when the only player scores', () => {
@@ -140,6 +147,41 @@ describe('room', () => {
     if (!again.ok) throw new Error('expected restart')
     expect(again.room.phase).toBe('lobby')
     expect(again.room.players.every((player) => player.score === 0)).toBe(true)
+    expect(again.room.history).toEqual([])
+  })
+
+  it('remembers which songs were guessed once the set is over', () => {
+    const started = markStarting(lobby(), 'host')
+    if (!started.ok) throw new Error('expected start')
+    const begun = beginGame(started.room, [song('Kesariya'), song('Ilahi')], 1_000, 12)
+    if (!begun.ok) throw new Error('expected begin')
+    const scored = submitGuess(begun.room, 'host', 'Kesariya', 1_200)
+    if (!scored.ok) throw new Error('expected score')
+    const next = advance(scored.room, 'host', 2_000, 12)
+    if (!next.ok) throw new Error('expected next')
+    expect(JSON.stringify(toView(next.room, 'host'))).not.toContain('Kesariya')
+    const ends = next.room.roundEndsAt
+    if (ends === null) throw new Error('expected a timer')
+    const revealed = revealIfDue(next.room, ends)
+    expect(revealed.phase).toBe('reveal')
+    const done = advance(revealed, 'host', ends + 1, 12)
+    if (!done.ok) throw new Error('expected done')
+    expect(toView(done.room, 'host')?.setlist).toEqual([
+      {
+        title: 'Kesariya',
+        artist: 'Someone',
+        storeUrl: 'https://music.apple.com/in/song/1',
+        guessed: true,
+        guessedBy: ['Aman'],
+      },
+      {
+        title: 'Ilahi',
+        artist: 'Someone',
+        storeUrl: 'https://music.apple.com/in/song/1',
+        guessed: false,
+        guessedBy: [],
+      },
+    ])
   })
 
   it('gives the artist fewer points than the title and leaves the round open', () => {

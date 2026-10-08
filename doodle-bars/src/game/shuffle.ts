@@ -1,4 +1,4 @@
-import { ROUNDS_PER_GAME } from './constants'
+import { DEFAULT_ROUNDS } from './constants'
 
 export type ShuffleRng = () => number
 
@@ -13,7 +13,7 @@ export type ShuffleRng = () => number
 export function orderAvoidingRecent<T extends { trackId: number }>(
   songs: readonly T[],
   recentIds: readonly number[],
-  take = ROUNDS_PER_GAME,
+  take = DEFAULT_ROUNDS,
   rng: ShuffleRng = Math.random,
 ): T[] {
   const catalogIds = new Set(songs.map((song) => song.trackId))

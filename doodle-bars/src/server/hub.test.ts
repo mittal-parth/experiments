@@ -80,6 +80,29 @@ describe('hub', () => {
     expect(revealed.view.artworkUrl).toBe('/fixture-cover.svg')
     expect(revealed.view.you.nickname).toBe('Aman')
     expect(revealed.view.players[0]?.score).toBeGreaterThan(0)
+    expect(revealed.view.setlist).toEqual([])
+  })
+
+  it('loads the number of songs the host asked for', async () => {
+    const host = fakeSocket()
+    handleSocket(host.socket)
+    host.emit({
+      type: 'create',
+      nickname: 'Aman',
+      playlistId: 'hindi',
+      clipSeconds: 5,
+      roundCount: 3,
+      mode: 'solo',
+    })
+    const lobby = lastSnapshot(host.sent)
+    if (lobby?.type !== 'snapshot') throw new Error('expected lobby')
+    expect(lobby.view.roundCount).toBe(3)
+    host.emit({ type: 'start' })
+    await viWait(host.sent)
+    const playing = lastSnapshot(host.sent)
+    if (playing?.type !== 'snapshot') throw new Error('expected snapshot')
+    expect(playing.view.totalRounds).toBe(3)
+    expect(playing.view.roundNumber).toBe(1)
   })
 })
 
