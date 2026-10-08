@@ -107,7 +107,7 @@ async function onMessage(client: Client, text: string): Promise<void> {
       onGuess(client, message.text)
       return
     case 'next':
-      onNext(client)
+      onNext(client, message.roundNumber)
       return
     case 'restart':
       onRestart(client)
@@ -275,6 +275,10 @@ function onGuess(client: Client, text: string): void {
   if (!located) return
   const guessed = submitGuess(located.room, located.playerId, text, Date.now())
   if (!guessed.ok) {
+    if (guessed.room) {
+      rooms.set(located.room.code, guessed.room)
+      broadcast(located.room.code)
+    }
     fail(client, guessed.error)
     return
   }
@@ -282,10 +286,10 @@ function onGuess(client: Client, text: string): void {
   broadcast(located.room.code)
 }
 
-function onNext(client: Client): void {
+function onNext(client: Client, fromRound: number): void {
   const located = locate(client)
   if (!located) return
-  const stepped = advance(located.room, located.playerId, Date.now(), guessGraceSeconds())
+  const stepped = advance(located.room, located.playerId, Date.now(), guessGraceSeconds(), fromRound)
   if (!stepped.ok) {
     fail(client, stepped.error)
     return

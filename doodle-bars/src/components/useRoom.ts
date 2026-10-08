@@ -9,6 +9,8 @@ import {
 } from '@/game/protocol'
 
 const SESSION_KEY = 'song-guesser-session'
+const REPLY_TIMEOUT_MS = 8_000
+const REPLY_TIMEOUT_ERROR = 'No response from the server. Try again.'
 
 function socketUrl(): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -56,10 +58,28 @@ export function useRoom() {
   const [view, setView] = useState<RoomView | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
+  const [waiting, setWaiting] = useState(false)
   const socketRef = useRef<WebSocket | null>(null)
   const queueRef = useRef<ClientMessage[]>([])
   const sessionRef = useRef<{ code: string; playerId: string } | null>(null)
   const acceptRef = useRef(true)
+  const waitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearWait = useCallback(() => {
+    if (waitTimer.current) clearTimeout(waitTimer.current)
+    waitTimer.current = null
+    setWaiting(false)
+  }, [])
+
+  const armWait = useCallback(() => {
+    setWaiting(true)
+    if (waitTimer.current) clearTimeout(waitTimer.current)
+    waitTimer.current = setTimeout(() => {
+      waitTimer.current = null
+      setWaiting(false)
+      setError(REPLY_TIMEOUT_ERROR)
+    }, REPLY_TIMEOUT_MS)
+  }, [])
 
   useEffect(() => {
     let stopped = false
@@ -85,7 +105,11 @@ export function useRoom() {
         const queued = queueRef.current
         queueRef.current = []
         for (const message of queued) {
-          socket?.send(JSON.stringify(message))
+          try {
+            socket?.send(JSON.stringify(message))
+          } catch {
+            queueRef.current.push(message)
+          }
         }
       }
       socket.onmessage = (event) => {
@@ -94,6 +118,7 @@ export function useRoom() {
         if (message.type === 'left') {
           sessionRef.current = null
           forgetSession()
+          clearWait()
           setView(null)
           return
         }
@@ -102,6 +127,7 @@ export function useRoom() {
             sessionRef.current = null
             forgetSession()
           }
+          clearWait()
           setError(message.message)
           return
         }
@@ -109,8 +135,9 @@ export function useRoom() {
         sessionRef.current = { code: message.view.code, playerId: message.playerId }
         rememberSession(message.view.code, message.playerId)
         syncRoomUrl(message.view.code, message.view.mode)
+        clearWait()
         setView(message.view)
-        setError(null)
+        setError((current) => (current === REPLY_TIMEOUT_ERROR ? null : current))
       }
       socket.onclose = () => {
         setConnected(false)
@@ -124,28 +151,40 @@ export function useRoom() {
     return () => {
       stopped = true
       clearTimeout(timer)
+      if (waitTimer.current) clearTimeout(waitTimer.current)
       socket?.close()
     }
+  }, [clearWait])
+
+  const transmit = useCallback((message: ClientMessage) => {
+    const socket = socketRef.current
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      try {
+        socket.send(JSON.stringify(message))
+        return
+      } catch {
+        // The socket closed between the check and the write. Queue it for the next open.
+      }
+    }
+    queueRef.current.push(message)
   }, [])
 
   const send = useCallback((message: ClientMessage) => {
     if (message.type === 'create' || message.type === 'join') acceptRef.current = true
     setError(null)
-    const socket = socketRef.current
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(message))
-      return
-    }
-    queueRef.current.push(message)
-  }, [])
+    armWait()
+    transmit(message)
+  }, [armWait, transmit])
 
   const leave = useCallback(() => {
     acceptRef.current = false
     sessionRef.current = null
     forgetSession()
+    clearWait()
+    setError(null)
     setView(null)
-    send({ type: 'leave' })
-  }, [send])
+    transmit({ type: 'leave' })
+  }, [clearWait, transmit])
 
-  return { view, error, connected, send, leave }
+  return { view, error, connected, waiting, send, leave }
 }

@@ -88,7 +88,7 @@ export type ClientMessage =
   | { type: 'configure'; playlistId: string; clipSeconds: number; roundCount: number; answer: AnswerMode }
   | { type: 'start'; avoidTrackIds: number[] }
   | { type: 'guess'; text: string }
-  | { type: 'next' }
+  | { type: 'next'; roundNumber: number }
   | { type: 'restart' }
   | { type: 'leave' }
 
@@ -175,7 +175,7 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
       return { type: 'guess', text }
     }
     case 'next':
-      return { type: 'next' }
+      return { type: 'next', roundNumber: readRoundNumber(value.roundNumber) }
     case 'restart':
       return { type: 'restart' }
     case 'leave':
@@ -206,6 +206,11 @@ export function parseServerMessage(value: unknown): ServerMessage | null {
 
 function readRoundCount(value: unknown): number {
   return typeof value === 'number' ? value : DEFAULT_ROUNDS
+}
+
+function readRoundNumber(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) return 0
+  return value
 }
 
 function readAnswer(value: unknown): AnswerMode | null {

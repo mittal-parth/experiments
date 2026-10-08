@@ -1,6 +1,7 @@
 import { MAX_PLAYERS } from './constants'
 import { clampClipSeconds } from './clip'
 import { judgeArtist, judgeGuess } from './guess'
+import { allowsArtistGuess } from './playlist-rules'
 import type { AnswerMode, GuessFeedback, RoomView, RoundRecap, SetlistEntry, SharedGuess } from './protocol'
 import { clampRoundCount } from './rounds'
 import { pointsForGuess, roundDurationMs } from './score'
@@ -45,7 +46,7 @@ export type Room = {
   starting: boolean
 }
 
-export type RoomResult = { ok: true; room: Room } | { ok: false; error: string }
+export type RoomResult = { ok: true; room: Room } | { ok: false; error: string; room?: Room }
 
 export function createRoom(input: {
   code: string
@@ -61,7 +62,7 @@ export function createRoom(input: {
   return {
     code: input.code,
     mode: input.mode,
-    answer: input.answer,
+    answer: allowsArtistGuess(input.playlistId) ? input.answer : 'song',
     hostId: input.hostId,
     playlistId: input.playlistId,
     playlistName: input.playlistName,
@@ -119,7 +120,7 @@ export function configureRoom(
   next.playlistName = playlistName
   next.clipSeconds = clampClipSeconds(clipSeconds)
   next.roundCount = clampRoundCount(roundCount)
-  next.answer = answer
+  next.answer = allowsArtistGuess(playlistId) ? answer : 'song'
   return { ok: true, room: next }
 }
 
@@ -167,7 +168,7 @@ export function beginGame(
 export function submitGuess(room: Room, playerId: string, text: string, now: number): RoomResult {
   if (room.phase !== 'playing') return { ok: false, error: 'Wait for the next round' }
   if (room.roundEndsAt !== null && now >= room.roundEndsAt) {
-    return { ok: true, room: syncPhase(room, now) }
+    return { ok: false, error: 'That round just ended', room: syncPhase(room, now) }
   }
   const player = room.players.find((item) => item.id === playerId)
   if (!player) return { ok: false, error: 'You are not in this room' }
@@ -177,7 +178,8 @@ export function submitGuess(room: Room, playerId: string, text: string, now: num
   const next = structuredClone(room)
   const titleJudgement = judgeGuess(text, song.title, song.aliases)
   const artistJudgement = judgeArtist(text, song.artist)
-  if (next.answer === 'artist') {
+  const artistCounts = allowsArtistGuess(next.playlistId)
+  if (next.answer === 'artist' && artistCounts) {
     return { ok: true, room: scoreArtistRound(next, player, text, now, titleJudgement, artistJudgement) }
   }
   if (titleJudgement === 'correct') {
@@ -187,7 +189,12 @@ export function submitGuess(room: Room, playerId: string, text: string, now: num
     next.guesses.push(guessNote(next, player, text, 'correct', points))
     return { ok: true, room: syncPhase(next, now) }
   }
-  if (artistJudgement === 'correct') {
+  if (!artistCounts && artistJudgement === 'correct' && titleJudgement !== 'close') {
+    next.feedback[playerId] = { correct: false, close: false, artist: true, song: true, points: 0 }
+    next.guesses.push(guessNote(next, player, text, 'miss', 0))
+    return { ok: true, room: next }
+  }
+  if (artistCounts && artistJudgement === 'correct') {
     if (next.artistIds.includes(playerId)) {
       next.feedback[playerId] = { correct: false, close: false, artist: true, song: false, points: 0 }
       next.guesses.push(guessNote(next, player, text, 'artist', 0))
@@ -199,7 +206,7 @@ export function submitGuess(room: Room, playerId: string, text: string, now: num
     next.guesses.push(guessNote(next, player, text, 'artist', points))
     return { ok: true, room: next }
   }
-  if (titleJudgement === 'close' || artistJudgement === 'close') {
+  if (titleJudgement === 'close' || (artistCounts && artistJudgement === 'close')) {
     next.feedback[playerId] = { correct: false, close: true, artist: false, song: false, points: 0 }
     next.guesses.push(guessNote(next, player, text, 'close', 0))
     return { ok: true, room: next }
@@ -317,9 +324,15 @@ export function advance(
   playerId: string,
   now: number,
   graceSeconds: number,
+  fromRound = 0,
 ): RoomResult {
   if (room.hostId !== playerId) return { ok: false, error: 'Only the host can do that' }
-  if (room.phase !== 'reveal') return { ok: false, error: 'Wait for the reveal' }
+  const currentRound = room.roundIndex >= 0 ? room.roundIndex + 1 : 0
+  if (fromRound > 0 && fromRound !== currentRound) return { ok: true, room }
+  if (room.phase !== 'reveal') {
+    if (fromRound > 0 && room.phase === 'done') return { ok: true, room }
+    return { ok: false, error: 'Wait for the reveal' }
+  }
   const next = structuredClone(room)
   const recorded = snapshotRound(room)
   if (recorded) next.history.push(recorded)

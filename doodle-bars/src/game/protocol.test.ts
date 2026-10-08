@@ -39,6 +39,14 @@ describe('parseClientMessage answer', () => {
   })
 })
 
+describe('parseClientMessage next', () => {
+  it('keeps a missing round as unspecified and accepts a real one', () => {
+    expect(parseClientMessage({ type: 'next' })).toEqual({ type: 'next', roundNumber: 0 })
+    expect(parseClientMessage({ type: 'next', roundNumber: 2 })).toEqual({ type: 'next', roundNumber: 2 })
+    expect(parseClientMessage({ type: 'next', roundNumber: 1.5 })).toEqual({ type: 'next', roundNumber: 0 })
+  })
+})
+
 describe('parseClientMessage start', () => {
   it('starts with no memory when the field is missing or messy', () => {
     expect(parseClientMessage({ type: 'start' })).toEqual({ type: 'start', avoidTrackIds: [] })

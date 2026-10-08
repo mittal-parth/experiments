@@ -328,4 +328,71 @@ describe('room', () => {
     expect(toView(named.room, 'host')?.reveal?.title).toBe('Kesariya')
     expect(toView(named.room, 'host')?.setlist).toEqual([])
   })
+
+  it('keeps an artist playlist on the song and scores the name nothing', () => {
+    const room = createRoom({
+      code: 'ABCD',
+      hostId: 'host',
+      nickname: 'Aman',
+      playlistId: 'michael-jackson',
+      playlistName: 'Michael Jackson',
+      clipSeconds: 5,
+      roundCount: 5,
+      mode: 'solo',
+      answer: 'artist',
+    })
+    expect(room.answer).toBe('song')
+    const locked = configureRoom(room, 'host', 'michael-jackson', 'Michael Jackson', 5, 5, 'artist')
+    if (!locked.ok) throw new Error('expected configure')
+    expect(locked.room.answer).toBe('song')
+    const opened = configureRoom(room, 'host', 'hindi', 'Hindi', 5, 5, 'artist')
+    if (!opened.ok) throw new Error('expected hindi')
+    expect(opened.room.answer).toBe('artist')
+
+    const started = markStarting(locked.room, 'host')
+    if (!started.ok) throw new Error('expected start')
+    const track = { ...song('Billie Jean'), artist: 'Michael Jackson', trackId: 269573364 }
+    const begun = beginGame(started.room, [track], 1_000, 12)
+    if (!begun.ok) throw new Error('expected begin')
+    const named = submitGuess(begun.room, 'host', 'Michael Jackson', 1_000)
+    if (!named.ok) throw new Error('expected guess')
+    expect(named.room.phase).toBe('playing')
+    expect(named.room.players[0]?.score).toBe(0)
+    expect(toView(named.room, 'host')?.lastGuess).toEqual({
+      correct: false,
+      close: false,
+      artist: true,
+      song: true,
+      points: 0,
+    })
+    const titled = submitGuess(named.room, 'host', 'Billie Jean', 1_200)
+    if (!titled.ok) throw new Error('expected title')
+    expect(titled.room.phase).toBe('reveal')
+    expect(titled.room.players[0]?.score).toBeGreaterThan(0)
+  })
+
+  it('does not swallow a guess after the clock, and ignores a repeated next', () => {
+    const started = markStarting(lobby(), 'host')
+    if (!started.ok) throw new Error('expected start')
+    const begun = beginGame(started.room, [song('Kesariya'), song('Ilahi')], 1_000, 12)
+    if (!begun.ok) throw new Error('expected begin')
+    const ends = begun.room.roundEndsAt ?? 0
+    const late = submitGuess(begun.room, 'host', 'Kesariya', ends)
+    expect(late.ok).toBe(false)
+    if (late.ok) return
+    expect(late.error).toBe('That round just ended')
+    expect(late.room?.phase).toBe('reveal')
+    expect(late.room?.players[0]?.score).toBe(0)
+
+    const revealed = late.room
+    if (!revealed) throw new Error('expected reveal')
+    const stepped = advance(revealed, 'host', ends, 12, 1)
+    if (!stepped.ok) throw new Error('expected next')
+    expect(stepped.room.phase).toBe('playing')
+    expect(stepped.room.roundIndex).toBe(1)
+    const repeated = advance(stepped.room, 'host', ends + 1, 12, 1)
+    if (!repeated.ok) throw new Error('expected resync')
+    expect(repeated.room.roundIndex).toBe(1)
+    expect(repeated.room.phase).toBe('playing')
+  })
 })

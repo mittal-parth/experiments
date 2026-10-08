@@ -11,6 +11,7 @@ import {
 } from 'drawably/react'
 import { playlistChoices } from '@/catalog/public'
 import { assertNever } from '@/game/assert-never'
+import { allowsArtistGuess } from '@/game/playlist-rules'
 import { BEST_KEY, bestScore, readStoredBest, withBest, type BestBoard } from '@/game/best'
 import { CLIP_CHOICES, DEFAULT_CLIP_SECONDS, DEFAULT_ROUNDS, ROUND_CHOICES } from '@/game/constants'
 import { HEARD_STORAGE_KEY, heardIds, storeHeard } from '@/game/heard'
@@ -66,6 +67,9 @@ export function GameApp() {
           view={room.view}
           send={room.send}
           leave={room.leave}
+          error={room.error}
+          waiting={room.waiting}
+          connected={room.connected}
         />
       </main>
     </div>
@@ -76,19 +80,25 @@ function Screen({
   view,
   send,
   leave,
+  error,
+  waiting,
+  connected,
 }: {
   view: RoomView | null
   send: (message: ClientMessage) => void
   leave: () => void
+  error: string | null
+  waiting: boolean
+  connected: boolean
 }) {
-  if (!view) return <Home send={send} />
+  if (!view) return <Home send={send} waiting={waiting} connected={connected} />
   switch (view.phase) {
     case 'lobby':
       return <Lobby view={view} send={send} leave={leave} />
     case 'playing':
-      return <Playing view={view} send={send} />
+      return <Playing view={view} send={send} waiting={waiting} error={error} />
     case 'reveal':
-      return <Reveal view={view} send={send} />
+      return <Reveal view={view} send={send} waiting={waiting} />
     case 'done':
       return <Done view={view} send={send} leave={leave} />
     default:
@@ -96,7 +106,15 @@ function Screen({
   }
 }
 
-function Home({ send }: { send: (message: ClientMessage) => void }) {
+function Home({
+  send,
+  waiting,
+  connected,
+}: {
+  send: (message: ClientMessage) => void
+  waiting: boolean
+  connected: boolean
+}) {
   const [nickname, setNickname] = useState('')
   const [playlistId, setPlaylistId] = useState<string>(playlistChoices[0]?.id ?? 'hindi')
   const [clipSeconds, setClipSeconds] = useState(DEFAULT_CLIP_SECONDS)
@@ -128,6 +146,7 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
   }
 
   function create(mode: 'solo' | 'room') {
+    if (waiting) return
     const nick = nickOrWarn()
     if (!nick) return
     unlockAudio()
@@ -135,6 +154,7 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
   }
 
   function join() {
+    if (waiting) return
     const nick = nickOrWarn()
     const roomCode = cleanCode(code)
     if (!nick) return
@@ -173,8 +193,14 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
               }}
             />
           </label>
-          <PlaylistField playlistId={playlistId} onChange={setPlaylistId} />
-          <AnswerField answer={answer} onChange={setAnswer} />
+          <PlaylistField
+            playlistId={playlistId}
+            onChange={(id) => {
+              setPlaylistId(id)
+              if (!allowsArtistGuess(id)) setAnswer('song')
+            }}
+          />
+          <AnswerField answer={answer} allowArtist={allowsArtistGuess(playlistId)} onChange={setAnswer} />
           <ClipField seconds={clipSeconds} onChange={setClipSeconds} />
           <RoundField count={roundCount} onChange={setRoundCount} />
           <PersonalBest nickname={nickname} pendingScore={null} />
@@ -188,9 +214,11 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
           seed={11}
           fill="#e24b4b"
           paper="#fffaf5"
+          state={waiting ? 'loading' : 'idle'}
+          disabled={waiting}
           onClick={() => create('solo')}
         >
-          Play solo
+          {waiting ? (connected ? 'Starting…' : 'Connecting…') : 'Play solo'}
         </DrawablyButton>
         <DrawablyButton
           type="button"
@@ -199,9 +227,11 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
           seed={12}
           fill="#1f8a70"
           paper="#fffaf5"
+          state={waiting ? 'loading' : 'idle'}
+          disabled={waiting}
           onClick={() => create('room')}
         >
-          Host a room
+          {waiting ? (connected ? 'Starting…' : 'Connecting…') : 'Host a room'}
         </DrawablyButton>
       </div>
       <DrawablyCard className="panel panel-rose" seed={9} stroke="#c44536" fill="#e24b4b">
@@ -230,9 +260,11 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
               seed={13}
               fill="#3a5ccc"
               paper="#fffaf5"
+              state={waiting ? 'loading' : 'idle'}
+              disabled={waiting}
               onClick={join}
             >
-              Join
+              {waiting ? (connected ? 'Joining…' : 'Connecting…') : 'Join'}
             </DrawablyButton>
           </div>
         </div>
@@ -276,6 +308,7 @@ function Lobby({
           />
           <AnswerField
             answer={view.answer}
+            allowArtist={allowsArtistGuess(view.playlistId)}
             disabled={!view.you.isHost || view.starting}
             onChange={(answer) => {
               send(settings(view, { answer }))
@@ -333,17 +366,35 @@ function Lobby({
 function Playing({
   view,
   send,
+  waiting,
+  error,
 }: {
   view: RoomView
   send: (message: ClientMessage) => void
+  waiting: boolean
+  error: string | null
 }) {
   const [guess, setGuess] = useState('')
+  const sentGuess = useRef<string | null>(null)
   const youSolved = view.players.some((player) => player.id === view.you.id && player.solved)
   const left = useCountdown(youSolved ? null : view.roundEndsAt)
 
+  useEffect(() => {
+    if (!sentGuess.current) return
+    const echoed = view.guesses.some((item) => item.playerId === view.you.id && item.text === sentGuess.current)
+    if (echoed) sentGuess.current = null
+  }, [view.guesses, view.you.id])
+
+  useEffect(() => {
+    if (!error || !sentGuess.current) return
+    setGuess(sentGuess.current)
+    sentGuess.current = null
+  }, [error])
+
   function submit() {
     const text = guess.trim()
-    if (!text || youSolved) return
+    if (!text || youSolved || waiting) return
+    sentGuess.current = text
     setGuess('')
     send({ type: 'guess', text })
   }
@@ -358,7 +409,9 @@ function Playing({
           <p className="quiet">
             {view.answer === 'artist'
               ? 'Faster answers score more. A close spelling still counts. The song title scores nothing.'
-              : 'Faster answers score more. The artist is worth fewer points.'}
+              : allowsArtistGuess(view.playlistId)
+                ? 'Faster answers score more. The artist is worth fewer points.'
+                : 'Faster answers score more. Name the song.'}
           </p>
           <p className="quiet" data-testid="courtesy">
             Preview courtesy of iTunes.
@@ -384,7 +437,7 @@ function Playing({
         <DrawablyCard className="panel panel-rose" seed={19} stroke="#c44536" fill="#e24b4b">
           <div className="stack">
             <label className="field" htmlFor="guess">
-              {view.answer === 'artist' ? 'Artist' : 'Song or artist'}
+              {view.answer === 'artist' ? 'Artist' : allowsArtistGuess(view.playlistId) ? 'Song or artist' : 'Song'}
               <DrawablyInput
                 id="guess"
                 data-testid="guess-input"
@@ -405,9 +458,10 @@ function Playing({
                 seed={21}
                 fill="#e24b4b"
                 paper="#fffaf5"
-                disabled={youSolved}
+                state={waiting ? 'loading' : 'idle'}
+                disabled={youSolved || waiting}
               >
-                Guess
+                {waiting ? 'Sending…' : 'Guess'}
               </DrawablyButton>
             </div>
           </div>
@@ -424,10 +478,13 @@ function Playing({
 function Reveal({
   view,
   send,
+  waiting,
 }: {
   view: RoomView
   send: (message: ClientMessage) => void
+  waiting: boolean
 }) {
+  const finishing = view.roundNumber >= view.totalRounds
   return (
     <div className="stack">
       <RoundHeading view={view} />
@@ -458,11 +515,15 @@ function Reveal({
           seed={24}
           fill="#1f8a70"
           paper="#fffaf5"
+          state={waiting ? 'loading' : 'idle'}
+          disabled={waiting}
           onClick={() => {
-            send({ type: 'next' })
+            if (waiting) return
+            unlockAudio()
+            send({ type: 'next', roundNumber: view.roundNumber })
           }}
         >
-          {view.roundNumber >= view.totalRounds ? 'Finish' : 'Next song'}
+          {waiting ? (finishing ? 'Finishing…' : 'Loading song…') : finishing ? 'Finish' : 'Next song'}
         </DrawablyButton>
       ) : (
         <p className="quiet">Waiting for the host.</p>
@@ -557,39 +618,51 @@ function AnswerField({
   answer,
   onChange,
   disabled = false,
+  allowArtist = true,
 }: {
   answer: AnswerMode
   onChange: (answer: AnswerMode) => void
   disabled?: boolean
+  allowArtist?: boolean
 }) {
   const choices: readonly { id: AnswerMode; label: string }[] = [
     { id: 'song', label: 'Song' },
     { id: 'artist', label: 'Artist' },
   ]
+  const shown: AnswerMode = allowArtist ? answer : 'song'
   return (
     <div className="stack tight">
       <span>Guess</span>
       <div className="row clip-choices">
-        {choices.map((choice) => (
-          <DrawablyButton
-            key={choice.id}
-            type="button"
-            data-testid={`answer-${choice.id}`}
-            seed={choice.id === 'song' ? 51 : 52}
-            variant={choice.id === answer ? 'solid' : 'outline'}
-            fill={choice.id === answer ? '#7b4b94' : '#fff6ea'}
-            paper={choice.id === answer ? '#fffaf5' : '#241c16'}
-            stroke="#7b4b94"
-            disabled={disabled}
-            aria-pressed={choice.id === answer}
-            onClick={() => {
-              onChange(choice.id)
-            }}
-          >
-            {choice.label}
-          </DrawablyButton>
-        ))}
+        {choices.map((choice) => {
+          const locked = choice.id === 'artist' && !allowArtist
+          return (
+            <DrawablyButton
+              key={choice.id}
+              type="button"
+              data-testid={`answer-${choice.id}`}
+              seed={choice.id === 'song' ? 51 : 52}
+              variant={choice.id === shown ? 'solid' : 'outline'}
+              fill={choice.id === shown ? '#7b4b94' : '#fff6ea'}
+              paper={choice.id === shown ? '#fffaf5' : '#241c16'}
+              stroke="#7b4b94"
+              disabled={disabled || locked}
+              aria-pressed={choice.id === shown}
+              onClick={() => {
+                if (locked) return
+                onChange(choice.id)
+              }}
+            >
+              {choice.label}
+            </DrawablyButton>
+          )
+        })}
       </div>
+      {!allowArtist ? (
+        <span className="quiet" data-testid="artist-locked">
+          This playlist is one artist, so you name the song.
+        </span>
+      ) : null}
     </div>
   )
 }
@@ -707,6 +780,15 @@ function ClipField({
 
 function Feedback({ last }: { last: RoomView['lastGuess'] }) {
   if (!last) return null
+  if (last.artist && last.song && !last.correct) {
+    return (
+      <DrawablyCard className="panel panel-sea" seed={29} stroke="#1f8a70" fill="#1f8a70">
+        <p className="feedback" data-testid="guess-feedback">
+          That&apos;s the artist. Name the song.
+        </p>
+      </DrawablyCard>
+    )
+  }
   if (last.correct && last.artist) {
     return (
       <DrawablyCard className="panel panel-leaf" seed={26} stroke="#2f8f4e" fill="#2f8f4e">
