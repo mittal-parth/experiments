@@ -152,6 +152,9 @@ describe('room', () => {
     expect(again.room.phase).toBe('lobby')
     expect(again.room.players.every((player) => player.score === 0)).toBe(true)
     expect(again.room.history).toEqual([])
+    const repeated = restart(again.room, 'host')
+    if (!repeated.ok) throw new Error('expected the same lobby')
+    expect(repeated.room.phase).toBe('lobby')
   })
 
   it('remembers which songs were guessed once the set is over', () => {

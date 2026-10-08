@@ -100,7 +100,7 @@ function Screen({
     case 'reveal':
       return <Reveal view={view} send={send} waiting={waiting} />
     case 'done':
-      return <Done view={view} send={send} leave={leave} />
+      return <Done view={view} send={send} leave={leave} waiting={waiting} connected={connected} />
     default:
       return assertNever(view.phase)
   }
@@ -536,10 +536,14 @@ function Done({
   view,
   send,
   leave,
+  waiting,
+  connected,
 }: {
   view: RoomView
   send: (message: ClientMessage) => void
   leave: () => void
+  waiting: boolean
+  connected: boolean
 }) {
   const ranked = standings(view.players)
   const headline = winnerText(view.players)
@@ -575,11 +579,14 @@ function Done({
             seed={25}
             fill="#f0a202"
             paper="#241c16"
+            state={waiting ? 'loading' : 'idle'}
+            disabled={waiting}
             onClick={() => {
+              if (waiting) return
               send({ type: 'restart' })
             }}
           >
-            Play again
+            {waiting ? (connected ? 'Starting…' : 'Connecting…') : 'Play again'}
           </DrawablyButton>
         ) : (
           <p className="quiet">Waiting for the host.</p>

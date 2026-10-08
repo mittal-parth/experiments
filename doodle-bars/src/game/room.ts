@@ -355,6 +355,7 @@ export function advance(
 
 export function restart(room: Room, playerId: string): RoomResult {
   if (room.hostId !== playerId) return { ok: false, error: 'Only the host can do that' }
+  if (room.phase === 'lobby') return { ok: true, room }
   if (room.phase !== 'done') return { ok: false, error: 'Finish the set first' }
   const next = structuredClone(room)
   next.phase = 'lobby'
