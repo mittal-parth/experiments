@@ -6,6 +6,12 @@ const ROUND_TITLES = ['Kesariya', 'Tum Hi Ho', 'Kal Ho Naa Ho', 'Channa Mereya',
 test('solo hindi round starts the clip and accepts a near spelling', async ({ page }) => {
   await page.goto('/')
   await page.getByTestId('nickname').fill('Aman')
+  await expect(page.getByTestId('playlist').locator('option[value="kannada"]')).toHaveText('Kannada')
+  await expect(page.getByTestId('playlist').locator('option[value="english"]')).toHaveText('English mix')
+  await expect(page.getByTestId('playlist').locator('option[value="english-romance"]')).toHaveText('English romance')
+  await expect(page.getByTestId('playlist').locator('option[value="english-party"]')).toHaveText('English party')
+  await expect(page.getByTestId('playlist').locator('option[value="english-classics"]')).toHaveText('English classics')
+  await expect(page.getByTestId('playlist').locator('option[value="english-rock"]')).toHaveText('English rock')
   await expect(page.getByTestId('playlist').locator('option[value="michael-jackson"]')).toHaveText('Michael Jackson')
   await page.getByTestId('play-solo').click()
   await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'lobby')
@@ -148,6 +154,48 @@ test('naming the artist scores fewer points and the revealed song is remembered'
   await expect
     .poll(() => sent.some((frame) => frame.includes('"type":"start"') && frame.includes('1635014240')))
     .toBe(true)
+})
+
+test('artist mode scores a fuzzy artist and gives the song title nothing', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('nickname').fill('Aman')
+  await page.getByTestId('answer-artist').click()
+  await expect(page.getByTestId('answer-artist')).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('play-solo').click()
+  await expect(page.getByTestId('answer-artist')).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('playlist').selectOption('hindi')
+  await page.getByTestId('start-game').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+  await expect(page.locator('.round-line')).toContainText('Name the artist')
+  await expect(page.locator('body')).not.toContainText('Kesariya')
+
+  await page.getByTestId('guess-input').fill('Kesariya')
+  await page.getByTestId('guess-submit').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+  await expect(page.getByTestId('guess-feedback')).toHaveText(/that's the song/i)
+  await expect(page.getByTestId('your-score')).toContainText('Aman 0')
+  await expect(page.getByTestId('guess-chat')).toContainText('Song title')
+
+  await page.getByTestId('guess-input').fill('Arijith Singh')
+  await page.getByTestId('guess-submit').click()
+  await expect(page.getByTestId('reveal-title')).toHaveText('Kesariya')
+  await expect(page.getByTestId('guess-feedback')).toHaveText(/that's the artist/i)
+  expect(scoreOf(await page.getByTestId('your-score').textContent())).toBeGreaterThan(0)
+})
+
+test('a kannada round starts without showing the title', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('nickname').fill('Aman')
+  await page.getByTestId('playlist').selectOption('kannada')
+  await expect(page.getByText('Kannada songs.')).toBeVisible()
+  await page.getByTestId('play-solo').click()
+  await expect(page.getByTestId('playlist')).toHaveValue('kannada')
+  await page.getByTestId('start-game').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+  await expect(page.locator('body')).not.toContainText('Belageddu')
+  await page.getByTestId('guess-input').fill('Belagiddu')
+  await page.getByTestId('guess-submit').click()
+  await expect(page.getByTestId('reveal-title')).toHaveText('Belageddu')
 })
 
 function scoreOf(text: string | null): number {

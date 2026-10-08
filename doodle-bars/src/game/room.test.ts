@@ -22,6 +22,7 @@ function lobby() {
     clipSeconds: 5,
     roundCount: 5,
     mode: 'room',
+    answer: 'song',
   })
 }
 
@@ -36,11 +37,12 @@ describe('room', () => {
     })
     const withGuest = joinRoom(room, { id: 'guest', nickname: 'Riya' })
     if (!withGuest.ok) throw new Error('expected join')
-    expect(configureRoom(withGuest.room, 'guest', 'english-pop', 'English pop', 3, 8).ok).toBe(false)
-    const configured = configureRoom(room, 'host', 'english-pop', 'English pop', 3, 8)
+    expect(configureRoom(withGuest.room, 'guest', 'english', 'English mix', 3, 8, 'artist').ok).toBe(false)
+    const configured = configureRoom(room, 'host', 'english', 'English mix', 3, 8, 'artist')
     if (!configured.ok) throw new Error('expected configure')
     expect(configured.room.roundCount).toBe(8)
-    const capped = configureRoom(room, 'host', 'hindi', 'Hindi', 5, 100)
+    expect(configured.room.answer).toBe('artist')
+    const capped = configureRoom(room, 'host', 'hindi', 'Hindi', 5, 100, 'song')
     if (!capped.ok) throw new Error('expected cap')
     expect(capped.room.roundCount).toBe(20)
   })
@@ -65,6 +67,7 @@ describe('room', () => {
       correct: false,
       close: false,
       artist: false,
+      song: false,
       points: 0,
     })
     expect(toView(wrong.room, 'host')?.guesses.map((guess) => guess.text)).toEqual(['nope'])
@@ -90,6 +93,7 @@ describe('room', () => {
       correct: false,
       close: true,
       artist: false,
+      song: false,
       points: 0,
     })
     expect(toView(close.room, 'host')?.reveal).toBeNull()
@@ -209,6 +213,7 @@ describe('room', () => {
       correct: false,
       close: false,
       artist: true,
+      song: false,
       points: artistPoints,
     })
     expect(toView(artist.room, 'guest')?.players.find((player) => player.id === 'guest')?.namedArtist).toBe(
@@ -274,5 +279,53 @@ describe('room', () => {
         scores: [],
       },
     ])
+  })
+
+  it('in artist mode scores a fuzzy artist and gives the song title nothing', () => {
+    const started = markStarting({ ...lobby(), answer: 'artist' }, 'host')
+    if (!started.ok) throw new Error('expected start')
+    const track = {
+      ...song('Kesariya'),
+      artist: 'Pritam, Arijit Singh & Amitabh Bhattacharya',
+      trackId: 1635014240,
+    }
+    const begun = beginGame(started.room, [track], 1_000, 12)
+    if (!begun.ok) throw new Error('expected begin')
+    const duration = roundDurationMs(5, 12)
+
+    const titled = submitGuess(begun.room, 'host', 'Kesariya', 1_000)
+    if (!titled.ok) throw new Error('expected title')
+    expect(titled.room.phase).toBe('playing')
+    expect(titled.room.players[0]?.score).toBe(0)
+    expect(toView(titled.room, 'host')?.lastGuess).toEqual({
+      correct: false,
+      close: false,
+      artist: false,
+      song: true,
+      points: 0,
+    })
+    expect(toView(titled.room, 'host')?.reveal).toBeNull()
+
+    const near = submitGuess(titled.room, 'host', 'Arijit Si', 1_100)
+    if (!near.ok) throw new Error('expected close')
+    expect(near.room.phase).toBe('playing')
+    expect(near.room.players[0]?.score).toBe(0)
+    expect(toView(near.room, 'host')?.lastGuess?.close).toBe(true)
+
+    const named = submitGuess(near.room, 'host', 'Arijith Singh', 1_200)
+    if (!named.ok) throw new Error('expected artist')
+    const points = pointsForGuess(200, duration, 'title')
+    expect(points).toBeGreaterThan(pointsForGuess(200, duration, 'artist'))
+    expect(named.room.phase).toBe('reveal')
+    expect(named.room.players[0]?.score).toBe(points)
+    expect(toView(named.room, 'host')?.lastGuess).toEqual({
+      correct: true,
+      close: false,
+      artist: true,
+      song: false,
+      points,
+    })
+    expect(toView(named.room, 'host')?.reveal?.title).toBe('Kesariya')
+    expect(toView(named.room, 'host')?.setlist).toEqual([])
   })
 })

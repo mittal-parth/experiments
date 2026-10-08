@@ -15,7 +15,7 @@ import { BEST_KEY, bestScore, readStoredBest, withBest, type BestBoard } from '@
 import { CLIP_CHOICES, DEFAULT_CLIP_SECONDS, DEFAULT_ROUNDS, ROUND_CHOICES } from '@/game/constants'
 import { HEARD_STORAGE_KEY, heardIds, storeHeard } from '@/game/heard'
 import { cleanCode, cleanNickname } from '@/game/names'
-import type { ClientMessage, RoomView, SharedGuess } from '@/game/protocol'
+import type { AnswerMode, ClientMessage, RoomView, SharedGuess } from '@/game/protocol'
 import { standings, winnerText } from '@/game/standings'
 import { ClipPlayer, unlockAudio } from './ClipPlayer'
 import { DoodleField, NoteBand } from './Doodles'
@@ -48,7 +48,7 @@ export function GameApp() {
       <main className="sheet" data-testid="phase" data-phase={phase}>
         <header className="mast">
           <NoteBand />
-          <p className="eyebrow">Hear a clip. Guess the song or the artist.</p>
+          <p className="eyebrow">Hear a clip. Name the song, or switch and name the artist.</p>
           <h1>
             Song <DrawablyHighlight seed={4} fill="#f0a202" stroke="#c47b12">Guesser</DrawablyHighlight>
           </h1>
@@ -101,6 +101,7 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
   const [playlistId, setPlaylistId] = useState<string>(playlistChoices[0]?.id ?? 'hindi')
   const [clipSeconds, setClipSeconds] = useState(DEFAULT_CLIP_SECONDS)
   const [roundCount, setRoundCount] = useState(DEFAULT_ROUNDS)
+  const [answer, setAnswer] = useState<AnswerMode>('song')
   const [code, setCode] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
 
@@ -130,7 +131,7 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
     const nick = nickOrWarn()
     if (!nick) return
     unlockAudio()
-    send({ type: 'create', nickname: nick, playlistId, clipSeconds, roundCount, mode })
+    send({ type: 'create', nickname: nick, playlistId, clipSeconds, roundCount, mode, answer })
   }
 
   function join() {
@@ -148,7 +149,7 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
   return (
     <div className="stack">
       <DrawablyCard className="panel panel-lilac" seed={2} stroke="#7b4b94" fill="#7b4b94">
-        <p className="lede">Hear a few seconds. Guess the song or the artist.</p>
+        <p className="lede">Hear a few seconds. Guess the song, or switch and name the artist.</p>
       </DrawablyCard>
       {localError ? (
         <p className="error" role="alert">
@@ -173,6 +174,7 @@ function Home({ send }: { send: (message: ClientMessage) => void }) {
             />
           </label>
           <PlaylistField playlistId={playlistId} onChange={setPlaylistId} />
+          <AnswerField answer={answer} onChange={setAnswer} />
           <ClipField seconds={clipSeconds} onChange={setClipSeconds} />
           <RoundField count={roundCount} onChange={setRoundCount} />
           <PersonalBest nickname={nickname} pendingScore={null} />
@@ -269,36 +271,28 @@ function Lobby({
             playlistId={view.playlistId}
             disabled={!view.you.isHost || view.starting}
             onChange={(playlistId) => {
-              send({
-                type: 'configure',
-                playlistId,
-                clipSeconds: view.clipSeconds,
-                roundCount: view.roundCount,
-              })
+              send(settings(view, { playlistId }))
+            }}
+          />
+          <AnswerField
+            answer={view.answer}
+            disabled={!view.you.isHost || view.starting}
+            onChange={(answer) => {
+              send(settings(view, { answer }))
             }}
           />
           <ClipField
             seconds={view.clipSeconds}
             disabled={!view.you.isHost || view.starting}
             onChange={(clipSeconds) => {
-              send({
-                type: 'configure',
-                playlistId: view.playlistId,
-                clipSeconds,
-                roundCount: view.roundCount,
-              })
+              send(settings(view, { clipSeconds }))
             }}
           />
           <RoundField
             count={view.roundCount}
             disabled={!view.you.isHost || view.starting}
             onChange={(roundCount) => {
-              send({
-                type: 'configure',
-                playlistId: view.playlistId,
-                clipSeconds: view.clipSeconds,
-                roundCount,
-              })
+              send(settings(view, { roundCount }))
             }}
           />
           <Scoreboard view={view} />
@@ -361,7 +355,11 @@ function Playing({
         <div className="stack">
           {view.clip ? <ClipPlayer key={view.roundNumber} url={view.clip.previewUrl} seconds={view.clipSeconds} /> : null}
           <p className="quiet">This clip is {view.clipSeconds} seconds, from later in the preview.</p>
-          <p className="quiet">Faster answers score more. The artist is worth fewer points.</p>
+          <p className="quiet">
+            {view.answer === 'artist'
+              ? 'Faster answers score more. A close spelling still counts. The song title scores nothing.'
+              : 'Faster answers score more. The artist is worth fewer points.'}
+          </p>
           <p className="quiet" data-testid="courtesy">
             Preview courtesy of iTunes.
           </p>
@@ -386,7 +384,7 @@ function Playing({
         <DrawablyCard className="panel panel-rose" seed={19} stroke="#c44536" fill="#e24b4b">
           <div className="stack">
             <label className="field" htmlFor="guess">
-              Song or artist
+              {view.answer === 'artist' ? 'Artist' : 'Song or artist'}
               <DrawablyInput
                 id="guess"
                 data-testid="guess-input"
@@ -542,6 +540,60 @@ function LinkIcon() {
   )
 }
 
+function settings(
+  view: RoomView,
+  patch: Partial<Pick<RoomView, 'playlistId' | 'clipSeconds' | 'roundCount' | 'answer'>>,
+): ClientMessage {
+  return {
+    type: 'configure',
+    playlistId: patch.playlistId ?? view.playlistId,
+    clipSeconds: patch.clipSeconds ?? view.clipSeconds,
+    roundCount: patch.roundCount ?? view.roundCount,
+    answer: patch.answer ?? view.answer,
+  }
+}
+
+function AnswerField({
+  answer,
+  onChange,
+  disabled = false,
+}: {
+  answer: AnswerMode
+  onChange: (answer: AnswerMode) => void
+  disabled?: boolean
+}) {
+  const choices: readonly { id: AnswerMode; label: string }[] = [
+    { id: 'song', label: 'Song' },
+    { id: 'artist', label: 'Artist' },
+  ]
+  return (
+    <div className="stack tight">
+      <span>Guess</span>
+      <div className="row clip-choices">
+        {choices.map((choice) => (
+          <DrawablyButton
+            key={choice.id}
+            type="button"
+            data-testid={`answer-${choice.id}`}
+            seed={choice.id === 'song' ? 51 : 52}
+            variant={choice.id === answer ? 'solid' : 'outline'}
+            fill={choice.id === answer ? '#7b4b94' : '#fff6ea'}
+            paper={choice.id === answer ? '#fffaf5' : '#241c16'}
+            stroke="#7b4b94"
+            disabled={disabled}
+            aria-pressed={choice.id === answer}
+            onClick={() => {
+              onChange(choice.id)
+            }}
+          >
+            {choice.label}
+          </DrawablyButton>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function PlaylistField({
   playlistId,
   onChange,
@@ -655,6 +707,15 @@ function ClipField({
 
 function Feedback({ last }: { last: RoomView['lastGuess'] }) {
   if (!last) return null
+  if (last.correct && last.artist) {
+    return (
+      <DrawablyCard className="panel panel-leaf" seed={26} stroke="#2f8f4e" fill="#2f8f4e">
+        <p className="feedback" data-testid="guess-feedback">
+          That&apos;s the artist. {last.points} points.
+        </p>
+      </DrawablyCard>
+    )
+  }
   if (last.correct) {
     return (
       <DrawablyCard className="panel panel-leaf" seed={26} stroke="#2f8f4e" fill="#2f8f4e">
@@ -671,6 +732,15 @@ function Feedback({ last }: { last: RoomView['lastGuess'] }) {
           {last.points > 0
             ? `That's the artist. ${last.points} points.`
             : 'You already named the artist.'}
+        </p>
+      </DrawablyCard>
+    )
+  }
+  if (last.song) {
+    return (
+      <DrawablyCard className="panel panel-rose" seed={30} stroke="#c44536" fill="#e24b4b">
+        <p className="feedback" data-testid="guess-feedback">
+          That&apos;s the song. No points.
         </p>
       </DrawablyCard>
     )
@@ -701,6 +771,8 @@ function guessTag(kind: SharedGuess['kind'], points: number): string | null {
       return `${points} points`
     case 'artist':
       return points > 0 ? `Artist · ${points}` : 'Already named'
+    case 'song':
+      return 'Song title'
     default:
       return assertNever(kind)
   }
@@ -879,6 +951,7 @@ function RoundHeading({ view }: { view: RoomView }) {
           Round {view.roundNumber} of {view.totalRounds}
         </span>
         <span>{view.playlistName}</span>
+        <span>{view.answer === 'artist' ? 'Name the artist' : 'Name the song'}</span>
       </p>
       <div className="pips" aria-hidden="true">
         {Array.from({ length: view.totalRounds }, (_, index) => (

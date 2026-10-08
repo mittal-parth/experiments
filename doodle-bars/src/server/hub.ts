@@ -142,6 +142,7 @@ function onCreate(client: Client, message: Extract<ClientMessage, { type: 'creat
     clipSeconds: message.clipSeconds,
     roundCount: message.roundCount,
     mode: message.mode,
+    answer: message.answer,
   })
   rooms.set(room.code, room)
   attach(client, room.code, playerId)
@@ -207,6 +208,7 @@ function onConfigure(
     playlist.name,
     message.clipSeconds,
     message.roundCount,
+    message.answer,
   )
   if (!configured.ok) {
     fail(client, configured.error)
