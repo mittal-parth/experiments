@@ -1,3 +1,4 @@
+import { assertNever } from './assert-never'
 import { DEFAULT_ROUNDS } from './constants'
 
 export type Phase = 'lobby' | 'playing' | 'reveal' | 'done'
@@ -73,6 +74,8 @@ export type RoomView = {
   starting: boolean
 }
 
+export type RoomClaim = { code?: string; playerId?: string }
+
 export type ClientMessage =
   | {
       type: 'create'
@@ -85,11 +88,17 @@ export type ClientMessage =
     }
   | { type: 'join'; code: string; nickname: string }
   | { type: 'resume'; code: string; playerId: string }
-  | { type: 'configure'; playlistId: string; clipSeconds: number; roundCount: number; answer: AnswerMode }
-  | { type: 'start'; avoidTrackIds: number[] }
-  | { type: 'guess'; text: string }
-  | { type: 'next'; roundNumber: number }
-  | { type: 'restart' }
+  | ({
+      type: 'configure'
+      playlistId: string
+      clipSeconds: number
+      roundCount: number
+      answer: AnswerMode
+    } & RoomClaim)
+  | ({ type: 'start'; avoidTrackIds: number[] } & RoomClaim)
+  | ({ type: 'guess'; text: string } & RoomClaim)
+  | ({ type: 'next'; roundNumber: number } & RoomClaim)
+  | ({ type: 'restart' } & RoomClaim)
   | { type: 'leave' }
 
 export type ServerMessage =
@@ -159,25 +168,28 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
       if (!playlistId || typeof value.clipSeconds !== 'number') return null
       const answer = readAnswer(value.answer)
       if (!answer) return null
-      return {
-        type: 'configure',
-        playlistId,
-        clipSeconds: value.clipSeconds,
-        roundCount: readRoundCount(value.roundCount),
-        answer,
-      }
+      return withClaim(
+        {
+          type: 'configure',
+          playlistId,
+          clipSeconds: value.clipSeconds,
+          roundCount: readRoundCount(value.roundCount),
+          answer,
+        },
+        value,
+      )
     }
     case 'start':
-      return { type: 'start', avoidTrackIds: readTrackIds(value.avoidTrackIds) }
+      return withClaim({ type: 'start', avoidTrackIds: readTrackIds(value.avoidTrackIds) }, value)
     case 'guess': {
       const text = readString(value.text, 80)
       if (!text) return null
-      return { type: 'guess', text }
+      return withClaim({ type: 'guess', text }, value)
     }
     case 'next':
-      return { type: 'next', roundNumber: readRoundNumber(value.roundNumber) }
+      return withClaim({ type: 'next', roundNumber: readRoundNumber(value.roundNumber) }, value)
     case 'restart':
-      return { type: 'restart' }
+      return withClaim({ type: 'restart' }, value)
     case 'leave':
       return { type: 'leave' }
     default:
@@ -201,6 +213,49 @@ export function parseServerMessage(value: unknown): ServerMessage | null {
       return { type: 'left' }
     default:
       return null
+  }
+}
+
+export function stampSession(
+  message: ClientMessage,
+  session: { code: string; playerId: string } | null,
+): ClientMessage {
+  if (!session) return message
+  switch (message.type) {
+    case 'configure':
+    case 'start':
+    case 'guess':
+    case 'next':
+    case 'restart':
+      return { ...message, code: session.code, playerId: session.playerId }
+    case 'create':
+    case 'join':
+    case 'resume':
+    case 'leave':
+      return message
+    default:
+      return assertNever(message)
+  }
+}
+
+function withClaim(message: ClientMessage, value: Record<string, unknown>): ClientMessage {
+  const code = readString(value.code, 8)
+  const playerId = readString(value.playerId, 80)
+  if (!code || !playerId) return message
+  switch (message.type) {
+    case 'configure':
+    case 'start':
+    case 'guess':
+    case 'next':
+    case 'restart':
+      return { ...message, code, playerId }
+    case 'create':
+    case 'join':
+    case 'resume':
+    case 'leave':
+      return message
+    default:
+      return assertNever(message)
   }
 }
 

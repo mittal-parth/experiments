@@ -1,9 +1,11 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { assertNever } from '@/game/assert-never'
 import { cleanCode } from '@/game/names'
 import {
   parseServerMessage,
+  stampSession,
   type ClientMessage,
   type RoomView,
 } from '@/game/protocol'
@@ -11,6 +13,8 @@ import {
 const SESSION_KEY = 'song-guesser-session'
 const REPLY_TIMEOUT_MS = 8_000
 const REPLY_TIMEOUT_ERROR = 'No response from the server. Try again.'
+const UNBOUND_ERROR = 'Join a room first'
+const STALE_ERRORS = new Set([REPLY_TIMEOUT_ERROR, UNBOUND_ERROR])
 
 function socketUrl(): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -64,6 +68,10 @@ export function useRoom() {
   const sessionRef = useRef<{ code: string; playerId: string } | null>(null)
   const acceptRef = useRef(true)
   const waitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastRoomCommand = useRef<ClientMessage | null>(null)
+  const recovering = useRef(false)
+  const recoveryUsed = useRef(false)
+  const transmitRef = useRef<(message: ClientMessage) => void>(() => {})
 
   const clearWait = useCallback(() => {
     if (waitTimer.current) clearTimeout(waitTimer.current)
@@ -93,26 +101,29 @@ export function useRoom() {
 
     const connect = () => {
       if (stopped) return
-      socket = new WebSocket(socketUrl())
-      socketRef.current = socket
-      socket.onopen = () => {
+      const opened = new WebSocket(socketUrl())
+      socket = opened
+      socketRef.current = opened
+      opened.onopen = () => {
+        if (socketRef.current !== opened) return
         setConnected(true)
         attempt = 0
         const session = sessionRef.current
         if (session && acceptRef.current) {
-          socket?.send(JSON.stringify({ type: 'resume', ...session } satisfies ClientMessage))
+          opened.send(JSON.stringify({ type: 'resume', ...session } satisfies ClientMessage))
         }
         const queued = queueRef.current
         queueRef.current = []
         for (const message of queued) {
           try {
-            socket?.send(JSON.stringify(message))
+            opened.send(JSON.stringify(message))
           } catch {
             queueRef.current.push(message)
           }
         }
       }
-      socket.onmessage = (event) => {
+      opened.onmessage = (event) => {
+        if (socketRef.current !== opened) return
         const message = parseServerMessage(typeof event.data === 'string' ? event.data : '')
         if (!message) return
         if (message.type === 'left') {
@@ -127,6 +138,23 @@ export function useRoom() {
             sessionRef.current = null
             forgetSession()
           }
+          const session = sessionRef.current
+          const retry = lastRoomCommand.current
+          if (
+            message.message === UNBOUND_ERROR &&
+            session &&
+            retry &&
+            acceptRef.current &&
+            !recoveryUsed.current
+          ) {
+            recoveryUsed.current = true
+            recovering.current = true
+            armWait()
+            transmitRef.current({ type: 'resume', code: session.code, playerId: session.playerId })
+            transmitRef.current(stampSession(retry, session))
+            return
+          }
+          recovering.current = false
           clearWait()
           setError(message.message)
           return
@@ -135,11 +163,14 @@ export function useRoom() {
         sessionRef.current = { code: message.view.code, playerId: message.playerId }
         rememberSession(message.view.code, message.playerId)
         syncRoomUrl(message.view.code, message.view.mode)
-        clearWait()
+        const resumeAck = recovering.current
+        recovering.current = false
+        if (!resumeAck) clearWait()
         setView(message.view)
-        setError((current) => (current === REPLY_TIMEOUT_ERROR ? null : current))
+        setError((current) => (current !== null && STALE_ERRORS.has(current) ? null : current))
       }
-      socket.onclose = () => {
+      opened.onclose = () => {
+        if (socketRef.current !== opened) return
         setConnected(false)
         if (stopped || !acceptRef.current) return
         attempt += 1
@@ -154,7 +185,7 @@ export function useRoom() {
       if (waitTimer.current) clearTimeout(waitTimer.current)
       socket?.close()
     }
-  }, [clearWait])
+  }, [armWait, clearWait])
 
   const transmit = useCallback((message: ClientMessage) => {
     const socket = socketRef.current
@@ -168,12 +199,30 @@ export function useRoom() {
     }
     queueRef.current.push(message)
   }, [])
+  transmitRef.current = transmit
 
   const send = useCallback((message: ClientMessage) => {
     if (message.type === 'create' || message.type === 'join') acceptRef.current = true
     setError(null)
+    recoveryUsed.current = false
+    switch (message.type) {
+      case 'configure':
+      case 'start':
+      case 'guess':
+      case 'next':
+      case 'restart':
+        lastRoomCommand.current = message
+        break
+      case 'create':
+      case 'join':
+      case 'resume':
+      case 'leave':
+        break
+      default:
+        assertNever(message)
+    }
     armWait()
-    transmit(message)
+    transmit(stampSession(message, sessionRef.current))
   }, [armWait, transmit])
 
   const leave = useCallback(() => {
