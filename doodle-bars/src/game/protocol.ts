@@ -2,6 +2,8 @@ import { DEFAULT_ROUNDS } from './constants'
 
 export type Phase = 'lobby' | 'playing' | 'reveal' | 'done'
 
+export type AnswerMode = 'song' | 'artist'
+
 export type SetlistEntry = {
   title: string
   artist: string
@@ -14,6 +16,7 @@ export type GuessFeedback = {
   correct: boolean
   close: boolean
   artist: boolean
+  song: boolean
   points: number
 }
 
@@ -22,7 +25,7 @@ export type SharedGuess = {
   playerId: string
   nickname: string
   text: string
-  kind: 'miss' | 'close' | 'correct' | 'artist'
+  kind: 'miss' | 'close' | 'correct' | 'artist' | 'song'
   points: number
 }
 
@@ -42,6 +45,7 @@ export type RoundRecap = {
 export type RoomView = {
   code: string
   mode: 'solo' | 'room'
+  answer: AnswerMode
   phase: Phase
   playlistId: string
   playlistName: string
@@ -77,10 +81,11 @@ export type ClientMessage =
       clipSeconds: number
       roundCount: number
       mode: 'solo' | 'room'
+      answer: AnswerMode
     }
   | { type: 'join'; code: string; nickname: string }
   | { type: 'resume'; code: string; playerId: string }
-  | { type: 'configure'; playlistId: string; clipSeconds: number; roundCount: number }
+  | { type: 'configure'; playlistId: string; clipSeconds: number; roundCount: number; answer: AnswerMode }
   | { type: 'start'; avoidTrackIds: number[] }
   | { type: 'guess'; text: string }
   | { type: 'next' }
@@ -125,6 +130,8 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
       if (!nickname || !playlistId) return null
       if (typeof value.clipSeconds !== 'number') return null
       if (value.mode !== 'solo' && value.mode !== 'room') return null
+      const answer = readAnswer(value.answer)
+      if (!answer) return null
       return {
         type: 'create',
         nickname,
@@ -132,6 +139,7 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
         clipSeconds: value.clipSeconds,
         roundCount: readRoundCount(value.roundCount),
         mode: value.mode,
+        answer,
       }
     }
     case 'join': {
@@ -149,11 +157,14 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
     case 'configure': {
       const playlistId = readString(value.playlistId, 40)
       if (!playlistId || typeof value.clipSeconds !== 'number') return null
+      const answer = readAnswer(value.answer)
+      if (!answer) return null
       return {
         type: 'configure',
         playlistId,
         clipSeconds: value.clipSeconds,
         roundCount: readRoundCount(value.roundCount),
+        answer,
       }
     }
     case 'start':
@@ -195,6 +206,12 @@ export function parseServerMessage(value: unknown): ServerMessage | null {
 
 function readRoundCount(value: unknown): number {
   return typeof value === 'number' ? value : DEFAULT_ROUNDS
+}
+
+function readAnswer(value: unknown): AnswerMode | null {
+  if (value === undefined) return 'song'
+  if (value === 'song' || value === 'artist') return value
+  return null
 }
 
 function safeJson(value: string): unknown {

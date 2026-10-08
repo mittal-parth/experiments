@@ -1,8 +1,8 @@
 import 'server-only'
-import { englishClassics } from './playlists/english-classics'
-import { michaelJackson } from './playlists/michael-jackson'
-import { englishPop } from './playlists/english-pop'
+import { english, englishClassics, englishParty, englishRock, englishRomance } from './playlists/english'
 import { hindi, hindiClassics, hindiParty, hindiRomance, hindiSufi } from './playlists/hindi'
+import { kannada } from './playlists/kannada'
+import { michaelJackson } from './playlists/michael-jackson'
 import { punjabi } from './playlists/punjabi'
 import type { Playlist } from './types'
 
@@ -14,8 +14,12 @@ const playlists: readonly Playlist[] = [
   hindiClassics,
   hindiSufi,
   punjabi,
-  englishPop,
+  kannada,
+  english,
+  englishRomance,
+  englishParty,
   englishClassics,
+  englishRock,
   michaelJackson,
 ]
 

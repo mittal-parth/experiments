@@ -1,7 +1,7 @@
 import { MAX_PLAYERS } from './constants'
 import { clampClipSeconds } from './clip'
 import { judgeArtist, judgeGuess } from './guess'
-import type { GuessFeedback, RoomView, RoundRecap, SetlistEntry, SharedGuess } from './protocol'
+import type { AnswerMode, GuessFeedback, RoomView, RoundRecap, SetlistEntry, SharedGuess } from './protocol'
 import { clampRoundCount } from './rounds'
 import { pointsForGuess, roundDurationMs } from './score'
 
@@ -25,6 +25,7 @@ export type Player = {
 export type Room = {
   code: string
   mode: 'solo' | 'room'
+  answer: AnswerMode
   hostId: string
   playlistId: string
   playlistName: string
@@ -55,10 +56,12 @@ export function createRoom(input: {
   clipSeconds: number
   roundCount: number
   mode: 'solo' | 'room'
+  answer: AnswerMode
 }): Room {
   return {
     code: input.code,
     mode: input.mode,
+    answer: input.answer,
     hostId: input.hostId,
     playlistId: input.playlistId,
     playlistName: input.playlistName,
@@ -105,6 +108,7 @@ export function configureRoom(
   playlistName: string,
   clipSeconds: number,
   roundCount: number,
+  answer: AnswerMode,
 ): RoomResult {
   if (room.hostId !== playerId) return { ok: false, error: 'Only the host can do that' }
   if (room.phase !== 'lobby' || room.starting) {
@@ -115,6 +119,7 @@ export function configureRoom(
   next.playlistName = playlistName
   next.clipSeconds = clampClipSeconds(clipSeconds)
   next.roundCount = clampRoundCount(roundCount)
+  next.answer = answer
   return { ok: true, room: next }
 }
 
@@ -171,34 +176,67 @@ export function submitGuess(room: Room, playerId: string, text: string, now: num
   if (!song) return { ok: false, error: 'No song in this round' }
   const next = structuredClone(room)
   const titleJudgement = judgeGuess(text, song.title, song.aliases)
+  const artistJudgement = judgeArtist(text, song.artist)
+  if (next.answer === 'artist') {
+    return { ok: true, room: scoreArtistRound(next, player, text, now, titleJudgement, artistJudgement) }
+  }
   if (titleJudgement === 'correct') {
     const points = awardPoints(next, playerId, now, 'title')
     next.solvedIds.push(playerId)
-    next.feedback[playerId] = { correct: true, close: false, artist: false, points }
+    next.feedback[playerId] = { correct: true, close: false, artist: false, song: false, points }
     next.guesses.push(guessNote(next, player, text, 'correct', points))
     return { ok: true, room: syncPhase(next, now) }
   }
-  const artistJudgement = judgeArtist(text, song.artist)
   if (artistJudgement === 'correct') {
     if (next.artistIds.includes(playerId)) {
-      next.feedback[playerId] = { correct: false, close: false, artist: true, points: 0 }
+      next.feedback[playerId] = { correct: false, close: false, artist: true, song: false, points: 0 }
       next.guesses.push(guessNote(next, player, text, 'artist', 0))
       return { ok: true, room: next }
     }
     const points = awardPoints(next, playerId, now, 'artist')
     next.artistIds.push(playerId)
-    next.feedback[playerId] = { correct: false, close: false, artist: true, points }
+    next.feedback[playerId] = { correct: false, close: false, artist: true, song: false, points }
     next.guesses.push(guessNote(next, player, text, 'artist', points))
     return { ok: true, room: next }
   }
   if (titleJudgement === 'close' || artistJudgement === 'close') {
-    next.feedback[playerId] = { correct: false, close: true, artist: false, points: 0 }
+    next.feedback[playerId] = { correct: false, close: true, artist: false, song: false, points: 0 }
     next.guesses.push(guessNote(next, player, text, 'close', 0))
     return { ok: true, room: next }
   }
-  next.feedback[playerId] = { correct: false, close: false, artist: false, points: 0 }
+  next.feedback[playerId] = { correct: false, close: false, artist: false, song: false, points: 0 }
   next.guesses.push(guessNote(next, player, text, 'miss', 0))
   return { ok: true, room: next }
+}
+
+function scoreArtistRound(
+  room: Room,
+  player: Player,
+  text: string,
+  now: number,
+  titleJudgement: ReturnType<typeof judgeGuess>,
+  artistJudgement: ReturnType<typeof judgeArtist>,
+): Room {
+  if (artistJudgement === 'correct') {
+    const points = awardPoints(room, player.id, now, 'title')
+    room.solvedIds.push(player.id)
+    room.feedback[player.id] = { correct: true, close: false, artist: true, song: false, points }
+    room.guesses.push(guessNote(room, player, text, 'correct', points))
+    return syncPhase(room, now)
+  }
+  if (titleJudgement === 'correct') {
+    room.feedback[player.id] = { correct: false, close: false, artist: false, song: true, points: 0 }
+    room.guesses.push(guessNote(room, player, text, 'song', 0))
+    return room
+  }
+  if (artistJudgement === 'close') {
+    room.feedback[player.id] = { correct: false, close: true, artist: false, song: false, points: 0 }
+    room.guesses.push(guessNote(room, player, text, 'close', 0))
+    return room
+  }
+  room.feedback[player.id] = { correct: false, close: false, artist: false, song: false, points: 0 }
+  room.guesses.push(guessNote(room, player, text, 'miss', 0))
+  return room
 }
 
 function awardPoints(room: Room, playerId: string, now: number, reason: 'title' | 'artist'): number {
@@ -361,6 +399,7 @@ export function toView(room: Room, playerId: string): RoomView | null {
   return {
     code: room.code,
     mode: room.mode,
+    answer: room.answer,
     phase: room.phase,
     playlistId: room.playlistId,
     playlistName: room.playlistName,

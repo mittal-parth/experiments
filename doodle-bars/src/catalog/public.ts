@@ -36,14 +36,34 @@ export const playlistChoices: readonly PlaylistChoice[] = [
     description: 'Punjabi songs.',
   },
   {
-    id: 'english-pop',
-    name: 'English pop',
-    description: 'Pop songs.',
+    id: 'kannada',
+    name: 'Kannada',
+    description: 'Kannada songs.',
+  },
+  {
+    id: 'english',
+    name: 'English mix',
+    description: 'Pop, rock, and older hits.',
+  },
+  {
+    id: 'english-romance',
+    name: 'English romance',
+    description: 'Love songs.',
+  },
+  {
+    id: 'english-party',
+    name: 'English party',
+    description: 'Dance songs.',
   },
   {
     id: 'english-classics',
     name: 'English classics',
     description: 'Older hits.',
+  },
+  {
+    id: 'english-rock',
+    name: 'English rock',
+    description: 'Rock songs.',
   },
   {
     id: 'michael-jackson',
