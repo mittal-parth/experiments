@@ -1,8 +1,27 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { hindi } from '@/catalog/playlists/hindi'
-import { largerArtwork, loadRoundSongs } from './previews'
+import type { Playlist } from '@/catalog/types'
+import { clearPreviewCache, largerArtwork, loadRoundSongs } from './previews'
+
+function lookupResponse(songs: readonly { trackId: number }[], include: (trackId: number) => boolean) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      results: songs.filter((song) => include(song.trackId)).map((song) => ({
+        trackId: song.trackId,
+        previewUrl: `https://audio.example/${song.trackId}.m4a`,
+        trackViewUrl: `https://music.apple.com/in/song/${song.trackId}`,
+        artworkUrl100: `https://is1-ssl.mzstatic.com/image/thumb/${song.trackId}/100x100bb.jpg`,
+      })),
+    }),
+  }
+}
 
 describe('loadRoundSongs', () => {
+  beforeEach(() => {
+    clearPreviewCache()
+  })
   it('uses the fixture tone and catalog order without calling iTunes', async () => {
     const fetchImpl = vi.fn()
     const songs = await loadRoundSongs(hindi, {
@@ -30,26 +49,55 @@ describe('loadRoundSongs', () => {
     expect(songs[0]?.storeUrl).toContain('music.apple.com')
   })
 
-  it('keeps curated titles when iTunes returns a preview', async () => {
-    const fetchImpl = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        results: hindi.songs.map((song) => ({
-          trackId: song.trackId,
-          previewUrl: `https://audio.example/${song.trackId}.m4a`,
-          trackViewUrl: `https://music.apple.com/in/song/${song.trackId}`,
-          artworkUrl100: `https://is1-ssl.mzstatic.com/image/thumb/${song.trackId}/100x100bb.jpg`,
-        })),
-      }),
-    }))
-    const songs = await loadRoundSongs(hindi, {
-      mode: 'live',
-      order: 'catalog',
+  it('asks iTunes only for the round, then reuses the cache', async () => {
+    const fetchImpl = vi.fn(async (url: string) => lookupResponse(hindi.songs, (id) => url.includes(String(id))))
+    const options = {
+      mode: 'live' as const,
+      order: 'catalog' as const,
       fetchImpl: fetchImpl as unknown as typeof fetch,
-    })
+    }
+    const songs = await loadRoundSongs(hindi, options)
     expect(songs[0]?.title).toBe('Kesariya')
     expect(songs[0]?.previewUrl).toBe('https://audio.example/1635014240.m4a')
     expect(songs[0]?.artworkUrl).toBe('https://is1-ssl.mzstatic.com/image/thumb/1635014240/600x600bb.jpg')
+    const requested = new URL(String(fetchImpl.mock.calls[0]?.[0])).searchParams.get('id')?.split(',') ?? []
+    expect(requested.length).toBeLessThan(20)
+    expect(requested).toContain('1635014240')
+    expect(requested).not.toContain(String(hindi.songs.at(-1)?.trackId))
+
+    fetchImpl.mockClear()
+    const again = await loadRoundSongs(hindi, options)
+    expect(again[0]?.trackId).toBe(songs[0]?.trackId)
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('retries a rate limit, then continues past songs with no preview', async () => {
+    const songs = Array.from({ length: 12 }, (_, index) => ({
+      trackId: index + 1,
+      title: `Song ${index + 1}`,
+      artist: 'Someone',
+    }))
+    const playlist: Playlist = {
+      id: 'sample',
+      name: 'Sample',
+      description: 'Sample',
+      storefront: 'us',
+      songs,
+    }
+    let calls = 0
+    const fetchImpl = vi.fn(async (url: string) => {
+      calls += 1
+      if (calls === 1) return { ok: false, status: 429, json: async () => ({}) }
+      const ids = new URL(url).searchParams.get('id')?.split(',').map(Number) ?? []
+      return lookupResponse(songs, (id) => ids.includes(id) && id >= 11)
+    })
+    const resolved = await loadRoundSongs(playlist, {
+      mode: 'live',
+      order: 'catalog',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }, 1)
+    expect(calls).toBeGreaterThan(1)
+    expect(resolved.map((song) => song.trackId)).toEqual([11])
   })
 
   it('skips songs this player already heard, then repeats the oldest once the pool is used up', async () => {

@@ -73,7 +73,8 @@ export function handleSocket(socket: SocketLike): void {
     onClose(client)
   })
   socket.on('error', () => {
-    onClose(client)
+    // Close follows. Dropping the room here lets Finish land on a live socket
+    // and come back as "Join a room first".
   })
 }
 
@@ -101,16 +102,16 @@ async function onMessage(client: Client, text: string): Promise<void> {
       onConfigure(client, message)
       return
     case 'start':
-      await onStart(client, message.avoidTrackIds)
+      await onStart(client, message)
       return
     case 'guess':
-      onGuess(client, message.text)
+      onGuess(client, message)
       return
     case 'next':
-      onNext(client)
+      onNext(client, message)
       return
     case 'restart':
-      onRestart(client)
+      onRestart(client, message)
       return
     case 'leave':
       onLeave(client)
@@ -179,14 +180,10 @@ function onJoin(client: Client, message: Extract<ClientMessage, { type: 'join' }
 
 function onResume(client: Client, message: Extract<ClientMessage, { type: 'resume' }>): void {
   const code = cleanCode(message.code)
-  const room = code ? rooms.get(code) : undefined
-  const player = room?.players.find((item) => item.id === message.playerId)
-  if (!room || !player || !code) {
+  if (!code || !adopt(client, code, message.playerId)) {
     fail(client, 'That room is gone')
     return
   }
-  detach(client)
-  attach(client, code, player.id)
   broadcast(code)
 }
 
@@ -194,7 +191,7 @@ function onConfigure(
   client: Client,
   message: Extract<ClientMessage, { type: 'configure' }>,
 ): void {
-  const located = locate(client)
+  const located = locate(client, message)
   if (!located) return
   const playlist = getPlaylist(message.playlistId)
   if (!playlist) {
@@ -218,8 +215,12 @@ function onConfigure(
   broadcast(located.room.code)
 }
 
-async function onStart(client: Client, avoidTrackIds: readonly number[]): Promise<void> {
-  const located = locate(client)
+async function onStart(
+  client: Client,
+  message: Extract<ClientMessage, { type: 'start' }>,
+): Promise<void> {
+  const located = locate(client, message)
+  const avoidTrackIds = message.avoidTrackIds
   if (!located) return
   const marked = markStarting(located.room, located.playerId)
   if (!marked.ok) {
@@ -270,11 +271,15 @@ async function onStart(client: Client, avoidTrackIds: readonly number[]): Promis
   }
 }
 
-function onGuess(client: Client, text: string): void {
-  const located = locate(client)
+function onGuess(client: Client, message: Extract<ClientMessage, { type: 'guess' }>): void {
+  const located = locate(client, message)
   if (!located) return
-  const guessed = submitGuess(located.room, located.playerId, text, Date.now())
+  const guessed = submitGuess(located.room, located.playerId, message.text, Date.now())
   if (!guessed.ok) {
+    if (guessed.room) {
+      rooms.set(located.room.code, guessed.room)
+      broadcast(located.room.code)
+    }
     fail(client, guessed.error)
     return
   }
@@ -282,10 +287,16 @@ function onGuess(client: Client, text: string): void {
   broadcast(located.room.code)
 }
 
-function onNext(client: Client): void {
-  const located = locate(client)
+function onNext(client: Client, message: Extract<ClientMessage, { type: 'next' }>): void {
+  const located = locate(client, message)
   if (!located) return
-  const stepped = advance(located.room, located.playerId, Date.now(), guessGraceSeconds())
+  const stepped = advance(
+    located.room,
+    located.playerId,
+    Date.now(),
+    guessGraceSeconds(),
+    message.roundNumber,
+  )
   if (!stepped.ok) {
     fail(client, stepped.error)
     return
@@ -294,8 +305,8 @@ function onNext(client: Client): void {
   broadcast(located.room.code)
 }
 
-function onRestart(client: Client): void {
-  const located = locate(client)
+function onRestart(client: Client, message: Extract<ClientMessage, { type: 'restart' }>): void {
+  const located = locate(client, message)
   if (!located) return
   const restarted = restart(located.room, located.playerId)
   if (!restarted.ok) {
@@ -339,17 +350,41 @@ function onClose(client: Client): void {
   broadcast(code)
 }
 
-function locate(client: Client): { room: Room; playerId: string } | null {
+function locate(
+  client: Client,
+  claim?: { code?: string; playerId?: string },
+): { room: Room; playerId: string } | null {
   if (!client.code || !client.playerId) {
+    const claimedCode = claim?.code ? cleanCode(claim.code) : null
+    const claimedPlayer = claim?.playerId
+    const rebound = Boolean(claimedCode && claimedPlayer && adopt(client, claimedCode, claimedPlayer))
+    if (!rebound) {
+      fail(client, claimedCode || claimedPlayer ? 'That room is gone' : 'Join a room first')
+      return null
+    }
+  }
+  const code = client.code
+  const playerId = client.playerId
+  if (!code || !playerId) {
     fail(client, 'Join a room first')
     return null
   }
-  const room = rooms.get(client.code)
+  const room = rooms.get(code)
   if (!room) {
     fail(client, 'That room is gone')
     return null
   }
-  return { room, playerId: client.playerId }
+  return { room, playerId }
+}
+
+function adopt(client: Client, code: string, playerId: string): boolean {
+  const room = rooms.get(code)
+  const player = room?.players.find((item) => item.id === playerId)
+  if (!room || !player) return false
+  if (client.code === code && client.playerId === playerId) return true
+  detach(client)
+  attach(client, code, player.id)
+  return true
 }
 
 function attach(client: Client, code: string, playerId: string): void {

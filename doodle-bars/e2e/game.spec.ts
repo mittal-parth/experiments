@@ -98,6 +98,17 @@ test('a room link joins, the timer stops after a correct guess, and the leaderbo
   expect(artistSize).toBeLessThan(titleSize)
   const padding = await host.locator('.recap > li').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).paddingTop))
   expect(padding).toBeGreaterThanOrEqual(16)
+  const whoPad = await host.locator('.recap-who').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).paddingLeft))
+  const ptsPad = await host.locator('.recap-pts').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).paddingLeft))
+  expect(whoPad).toBeGreaterThanOrEqual(10)
+  expect(ptsPad).toBeGreaterThanOrEqual(10)
+  const scoreShadow = await host.locator('.recap-scores li').first().evaluate((node) => getComputedStyle(node).boxShadow)
+  expect(scoreShadow).toBe('none')
+  const whoBox = await host.locator('.recap-who').first().boundingBox()
+  const ptsBox = await host.locator('.recap-pts').first().boundingBox()
+  expect(whoBox).not.toBeNull()
+  expect(ptsBox).not.toBeNull()
+  expect((ptsBox?.x ?? 0) > (whoBox?.x ?? 0) + (whoBox?.width ?? 0) - 1).toBe(true)
   await expect(host.getByRole('link', { name: /Listen to Kesariya on Apple Music/ })).toHaveAttribute('href', /music\.apple\.com/)
 
   await hostContext.close()
@@ -181,6 +192,64 @@ test('artist mode scores a fuzzy artist and gives the song title nothing', async
   await expect(page.getByTestId('reveal-title')).toHaveText('Kesariya')
   await expect(page.getByTestId('guess-feedback')).toHaveText(/that's the artist/i)
   expect(scoreOf(await page.getByTestId('your-score').textContent())).toBeGreaterThan(0)
+})
+
+test('next song shows a loader while the preview is still downloading', async ({ page }) => {
+  let hits = 0
+  await page.route('**/api/fixture-tone*', async (route) => {
+    hits += 1
+    if (hits > 1) await new Promise((resolve) => setTimeout(resolve, 1200))
+    const response = await route.fetch()
+    await route.fulfill({
+      status: response.status(),
+      body: await response.body(),
+      headers: {
+        ...response.headers(),
+        'cache-control': 'no-store',
+      },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByTestId('nickname').fill('Aman')
+  await page.getByTestId('play-solo').click()
+  await page.getByTestId('playlist').selectOption('hindi')
+  await page.getByTestId('start-game').click()
+  await expect(page.getByTestId('clip-status')).toHaveText('playing')
+  await page.getByTestId('guess-input').fill('Kesariya')
+  await page.getByTestId('guess-submit').click()
+  await expect(page.getByTestId('reveal-title')).toHaveText('Kesariya')
+  await page.getByTestId('next-round').click()
+  await expect(page.getByTestId('play-clip')).toHaveText('Loading…')
+  await page.getByTestId('play-clip').click()
+  await expect(page.getByTestId('clip-status')).toHaveText('playing')
+})
+
+test('michael jackson playlists do not score the artist', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('nickname').fill('Aman')
+  await page.getByTestId('answer-artist').click()
+  await page.getByTestId('playlist').selectOption('michael-jackson')
+  await expect(page.getByTestId('answer-song')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('answer-artist')).toBeDisabled()
+  await expect(page.getByTestId('artist-locked')).toBeVisible()
+  await page.getByTestId('play-solo').click()
+  await expect(page.getByTestId('answer-artist')).toBeDisabled()
+  await expect(page.getByTestId('answer-song')).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('start-game').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+  await expect(page.locator('.round-line')).toContainText('Name the song')
+  await expect(page.locator('body')).not.toContainText('Billie Jean')
+
+  await page.getByTestId('guess-input').fill('Michael Jackson')
+  await page.getByTestId('guess-submit').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+  await expect(page.getByTestId('guess-feedback')).toHaveText(/name the song/i)
+  await expect(page.getByTestId('your-score')).toContainText('Aman 0')
+
+  await page.getByTestId('guess-input').fill('Billie Jean')
+  await page.getByTestId('guess-submit').click()
+  await expect(page.getByTestId('reveal-title')).toHaveText('Billie Jean')
 })
 
 test('a kannada round starts without showing the title', async ({ page }) => {

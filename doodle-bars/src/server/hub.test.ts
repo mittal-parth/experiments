@@ -24,6 +24,9 @@ function fakeSocket() {
     emit(message: unknown) {
       for (const listener of listeners.message) listener(JSON.stringify(message))
     },
+    emitError() {
+      for (const listener of listeners.error) listener(new Error('socket'))
+    },
   }
 }
 
@@ -103,6 +106,68 @@ describe('hub', () => {
     if (playing?.type !== 'snapshot') throw new Error('expected snapshot')
     expect(playing.view.totalRounds).toBe(3)
     expect(playing.view.roundNumber).toBe(1)
+  })
+
+  it('finishes the set when the socket forgot the room but the click still names the player', async () => {
+    const host = fakeSocket()
+    handleSocket(host.socket)
+    host.emit({
+      type: 'create',
+      nickname: 'Aman',
+      playlistId: 'hindi',
+      clipSeconds: 3,
+      roundCount: 1,
+      mode: 'solo',
+    })
+    host.emit({ type: 'start' })
+    await viWait(host.sent)
+    host.emit({ type: 'guess', text: 'Kesariya' })
+    const revealed = lastSnapshot(host.sent)
+    if (revealed?.type !== 'snapshot') throw new Error('expected reveal')
+    expect(revealed.view.phase).toBe('reveal')
+
+    const rebound = fakeSocket()
+    handleSocket(rebound.socket)
+    rebound.emit({
+      type: 'next',
+      roundNumber: revealed.view.roundNumber,
+      code: revealed.view.code,
+      playerId: revealed.playerId,
+    })
+    const finished = lastSnapshot(rebound.sent)
+    if (finished?.type !== 'snapshot') throw new Error('expected the recap')
+    expect(finished.view.phase).toBe('done')
+    expect(rebound.sent.some((message) => message.type === 'error')).toBe(false)
+  })
+
+  it('keeps the seat when the socket reports an error and has not closed', async () => {
+    const host = fakeSocket()
+    handleSocket(host.socket)
+    host.emit({
+      type: 'create',
+      nickname: 'Aman',
+      playlistId: 'hindi',
+      clipSeconds: 3,
+      roundCount: 1,
+      mode: 'solo',
+    })
+    host.emit({ type: 'start' })
+    await viWait(host.sent)
+    host.emitError()
+    host.emit({ type: 'guess', text: 'Kesariya' })
+    const revealed = lastSnapshot(host.sent)
+    if (revealed?.type !== 'snapshot') throw new Error('expected reveal')
+    expect(revealed.view.phase).toBe('reveal')
+    expect(host.sent.some((message) => message.type === 'error' && message.message === 'Join a room first')).toBe(
+      false,
+    )
+  })
+
+  it('still tells a stranger to join before finishing', () => {
+    const stranger = fakeSocket()
+    handleSocket(stranger.socket)
+    stranger.emit({ type: 'next', roundNumber: 1 })
+    expect(stranger.sent.at(-1)).toEqual({ type: 'error', message: 'Join a room first' })
   })
 })
 
