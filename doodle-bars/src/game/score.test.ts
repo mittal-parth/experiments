@@ -26,9 +26,16 @@ describe('clipStartSeconds', () => {
 })
 
 describe('pointsForGuess', () => {
-  it('pays more for a fast guess and less for a later solver', () => {
-    expect(pointsForGuess(0, 17_000, false)).toBe(1000)
-    expect(pointsForGuess(17_000, 17_000, false)).toBe(100)
-    expect(pointsForGuess(0, 17_000, true)).toBe(600)
+  it('pays more for a fast title, less for a later solver, and less again for the artist', () => {
+    expect(pointsForGuess(0, 17_000, 'title')).toBe(1000)
+    expect(pointsForGuess(17_000, 17_000, 'title')).toBe(100)
+    expect(pointsForGuess(0, 17_000, 'later')).toBe(600)
+    expect(pointsForGuess(0, 17_000, 'artist')).toBe(250)
+    expect(pointsForGuess(17_000, 17_000, 'artist')).toBe(25)
+    for (const elapsed of [0, 1_000, 8_000, 17_000]) {
+      expect(pointsForGuess(elapsed, 17_000, 'artist')).toBeLessThan(
+        pointsForGuess(elapsed, 17_000, 'title'),
+      )
+    }
   })
 })

@@ -101,7 +101,7 @@ async function onMessage(client: Client, text: string): Promise<void> {
       onConfigure(client, message)
       return
     case 'start':
-      await onStart(client)
+      await onStart(client, message.avoidTrackIds)
       return
     case 'guess':
       onGuess(client, message.text)
@@ -216,7 +216,7 @@ function onConfigure(
   broadcast(located.room.code)
 }
 
-async function onStart(client: Client): Promise<void> {
+async function onStart(client: Client, avoidTrackIds: readonly number[]): Promise<void> {
   const located = locate(client)
   if (!located) return
   const marked = markStarting(located.room, located.playerId)
@@ -234,7 +234,12 @@ async function onStart(client: Client): Promise<void> {
     return
   }
   try {
-    const songs = await loadRoundSongs(playlist, previewOptionsFromEnv(), marked.room.roundCount)
+    const songs = await loadRoundSongs(
+      playlist,
+      previewOptionsFromEnv(),
+      marked.room.roundCount,
+      avoidTrackIds,
+    )
     const current = rooms.get(located.room.code)
     if (!current || !current.starting) return
     if (songs.length === 0) {

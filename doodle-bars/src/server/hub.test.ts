@@ -69,7 +69,7 @@ describe('hub', () => {
     const missed = lastSnapshot(host.sent)
     if (missed?.type !== 'snapshot') throw new Error('expected miss')
     expect(missed.view.phase).toBe('playing')
-    expect(missed.view.lastGuess).toEqual({ correct: false, close: false, points: 0 })
+    expect(missed.view.lastGuess).toEqual({ correct: false, close: false, artist: false, points: 0 })
     expect(JSON.stringify(missed.view)).not.toContain('Kesariya')
 
     host.emit({ type: 'guess', text: 'Kesariya' })

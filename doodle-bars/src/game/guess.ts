@@ -21,6 +21,31 @@ export function matchesAnswer(
   return judgeGuess(guess, title, aliases) === 'correct'
 }
 
+const CREDIT_SPLIT = /\s*(?:,|&|\/|\band\b|\bfeat\.?\b|\bft\.?\b|\bwith\b)\s*/i
+
+export function artistCredits(artist: string): string[] {
+  const parts = artist
+    .split(CREDIT_SPLIT)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+  const credits: string[] = []
+  const seen = new Set<string>()
+  for (const part of [artist.trim(), ...parts]) {
+    const key = normalizeAnswer(part)
+    if (key.length < 3 || seen.has(key)) continue
+    seen.add(key)
+    credits.push(part)
+  }
+  return credits
+}
+
+export function judgeArtist(guess: string, artist: string): GuessJudgement {
+  const credits = artistCredits(artist)
+  const first = credits[0]
+  if (!first) return 'miss'
+  return judgeGuess(guess, first, credits.slice(1))
+}
+
 export function judgeGuess(
   guess: string,
   title: string,

@@ -3,6 +3,7 @@ import type { Playlist, Song } from '@/catalog/types'
 import { DEFAULT_ROUNDS } from '@/game/constants'
 import { clampRoundCount } from '@/game/rounds'
 import type { RoundSong } from '@/game/room'
+import { orderAvoidingRecent, type ShuffleRng } from '@/game/shuffle'
 
 export type PreviewMode = 'fixture' | 'live'
 export type SongOrder = 'catalog' | 'shuffle'
@@ -38,22 +39,24 @@ export async function loadRoundSongs(
   playlist: Playlist,
   options: PreviewOptions,
   roundCount = DEFAULT_ROUNDS,
+  avoidTrackIds: readonly number[] = [],
+  rng: ShuffleRng = Math.random,
 ): Promise<RoundSong[]> {
-  const ordered = orderSongs(playlist.songs, options.order)
+  const take = clampRoundCount(roundCount)
+  const ordered = orderSongs(playlist.songs, options.order, avoidTrackIds, take, rng)
   const resolved = await resolvePreviews(ordered, playlist.storefront, options)
-  return resolved.slice(0, clampRoundCount(roundCount))
+  return resolved.slice(0, take)
 }
 
-export function orderSongs<T>(songs: readonly T[], order: SongOrder): T[] {
-  const copy = [...songs]
-  if (order === 'catalog') return copy
-  for (let index = copy.length - 1; index > 0; index -= 1) {
-    const swap = Math.floor(Math.random() * (index + 1))
-    const current = copy[index]
-    copy[index] = copy[swap]
-    copy[swap] = current
-  }
-  return copy
+export function orderSongs<T extends { trackId: number }>(
+  songs: readonly T[],
+  order: SongOrder,
+  avoidTrackIds: readonly number[] = [],
+  take = DEFAULT_ROUNDS,
+  rng: ShuffleRng = Math.random,
+): T[] {
+  if (order === 'catalog') return [...songs]
+  return orderAvoidingRecent(songs, avoidTrackIds, take, rng)
 }
 
 async function resolvePreviews(

@@ -6,7 +6,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'Song Guesser',
-  description: 'Hear a short clip and name the song.',
+  description: 'Hear a short clip and guess the song.',
 }
 
 export const viewport: Viewport = {

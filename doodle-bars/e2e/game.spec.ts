@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { HEARD_STORAGE_KEY } from '../src/game/heard'
 
 const ROUND_TITLES = ['Kesariya', 'Tum Hi Ho', 'Kal Ho Naa Ho', 'Channa Mereya', 'Apna Bana Le']
 
@@ -78,15 +79,81 @@ test('a room link joins, the timer stops after a correct guess, and the leaderbo
   await expect(host.getByTestId('winner')).toHaveText('Riya wins')
   await expect(host.getByTestId('leaderboard')).toContainText('Riya')
   await expect(guest.getByTestId('winner')).toHaveText('Riya wins')
+  await expect(host.getByTestId('guessed-count')).toHaveText('Guessed 5')
   await expect(host.getByTestId('setlist-guessed')).toContainText('Kesariya')
   await expect(host.getByTestId('setlist-guessed')).toContainText('Apna Bana Le')
   await expect(host.getByTestId('setlist-missed')).toHaveText('None')
   await expect(guest.getByTestId('setlist-guessed')).toContainText('Riya')
   await expect(guest.getByTestId('personal-best')).toHaveText(/Best across games: [1-9]/)
+  await expect(host.getByTestId('recap-points').first()).toHaveText(/\d+/)
+  await expect(host.locator('.recap-title').first()).toHaveCSS('text-decoration-line', 'none')
+  const titleSize = await host.locator('.recap-title').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize))
+  const artistSize = await host.locator('.recap-artist').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize))
+  expect(artistSize).toBeLessThan(titleSize)
+  const padding = await host.locator('.recap > li').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).paddingTop))
+  expect(padding).toBeGreaterThanOrEqual(16)
+  await expect(host.getByRole('link', { name: /Listen to Kesariya on Apple Music/ })).toHaveAttribute('href', /music\.apple\.com/)
 
   await hostContext.close()
   await guestContext.close()
 })
+
+test('naming the artist scores fewer points and the revealed song is remembered', async ({ page }) => {
+  const sent: string[] = []
+  page.on('websocket', (ws) => {
+    ws.on('framesent', (frame) => {
+      sent.push(String(frame.payload))
+    })
+  })
+
+  await page.goto('/')
+  await page.getByTestId('nickname').fill('Aman')
+  await page.getByTestId('play-solo').click()
+  await page.getByTestId('playlist').selectOption('hindi')
+  await page.getByTestId('start-game').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+
+  await page.getByTestId('guess-input').fill('Arijit Singh')
+  await page.getByTestId('guess-submit').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+  await expect(page.getByTestId('guess-feedback')).toHaveText(/that's the artist/i)
+  await expect(page.getByTestId('your-score')).toContainText('artist')
+  await expect(page.locator('body')).not.toContainText('Kesariya')
+  const artistScore = scoreOf(await page.getByTestId('your-score').textContent())
+  expect(artistScore).toBeGreaterThan(0)
+
+  await page.getByTestId('guess-input').fill('Kesariya')
+  await page.getByTestId('guess-submit').click()
+  await expect(page.getByTestId('reveal-title')).toHaveText('Kesariya')
+  await expect(page.getByTestId('guess-feedback')).toHaveText(/that's it/i)
+  expect(scoreOf(await page.getByTestId('your-score').textContent())).toBeGreaterThan(artistScore)
+  await expect
+    .poll(() => page.evaluate((key) => localStorage.getItem(key), HEARD_STORAGE_KEY))
+    .toContain('1635014240')
+
+  for (const title of ROUND_TITLES.slice(1)) {
+    await page.getByTestId('next-round').click()
+    await guessTitle(page, title)
+    await expect(page.getByTestId('reveal-title')).toHaveText(title)
+  }
+  await page.getByTestId('next-round').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'done')
+  await expect(page.getByTestId('guessed-count')).toHaveText('Guessed 5')
+  await expect(page.getByTestId('setlist-guessed').locator('[data-kind="artist"]')).toContainText('artist')
+  await page.getByTestId('play-again').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'lobby')
+
+  sent.length = 0
+  await page.getByTestId('start-game').click()
+  await expect
+    .poll(() => sent.some((frame) => frame.includes('"type":"start"') && frame.includes('1635014240')))
+    .toBe(true)
+})
+
+function scoreOf(text: string | null): number {
+  const match = text?.match(/(\d+)/)
+  return match ? Number(match[1]) : 0
+}
 
 test('the host can choose how many songs, then the recap and best score stick', async ({ page }) => {
   await page.goto('/')

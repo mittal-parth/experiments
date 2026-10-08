@@ -1,12 +1,29 @@
+import { assertNever } from './assert-never'
 import { clampClipSeconds } from './clip'
 
-export function pointsForGuess(elapsedMs: number, roundMs: number, later: boolean): number {
+export type PointReason = 'title' | 'later' | 'artist'
+
+const ARTIST_POINT_RATIO = 0.25
+
+export function pointsForGuess(
+  elapsedMs: number,
+  roundMs: number,
+  reason: PointReason = 'title',
+): number {
   const safeRound = Math.max(1, roundMs)
   const elapsed = Math.min(Math.max(0, elapsedMs), safeRound)
   const ratio = (safeRound - elapsed) / safeRound
   const base = Math.max(100, Math.round(1000 * ratio))
-  if (!later) return base
-  return Math.max(50, Math.round(base * 0.6))
+  switch (reason) {
+    case 'title':
+      return base
+    case 'later':
+      return Math.max(50, Math.round(base * 0.6))
+    case 'artist':
+      return Math.max(25, Math.round(base * ARTIST_POINT_RATIO))
+    default:
+      return assertNever(reason)
+  }
 }
 
 export function roundDurationMs(clipSeconds: number, graceSeconds: number): number {
