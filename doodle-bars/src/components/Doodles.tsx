@@ -38,18 +38,3 @@ export function NoteBand() {
     </div>
   )
 }
-
-export function DoodleField() {
-  return (
-    <div className="doodle-field" aria-hidden="true">
-      <NoteIcon className="doodle d1" />
-      <Beamed className="doodle d2" />
-      <Star className="doodle d3" />
-      <NoteIcon className="doodle d4" />
-      <span className="doodle disc d5" />
-      <Beamed className="doodle d6" />
-      <Star className="doodle d7" />
-      <NoteIcon className="doodle d8" />
-    </div>
-  )
-}

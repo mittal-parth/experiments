@@ -1,7 +1,7 @@
 :root {
   --ink: #241c16;
   --paper: #fff6ea;
-  --cardboard: #cf9f68;
+  --cardboard: #e9d0a8;
   --coral: #e24b4b;
   --marigold: #f0a202;
   --teal: #1f8a70;
@@ -31,15 +31,15 @@ body {
     url("/cardboard-doodles.svg"),
     repeating-linear-gradient(
       90deg,
-      rgba(255, 236, 200, 0.34) 0,
-      rgba(255, 236, 200, 0.12) 4px,
-      rgba(90, 52, 20, 0) 8px,
-      rgba(90, 52, 20, 0.2) 12px,
-      rgba(90, 52, 20, 0.07) 15px,
-      rgba(255, 236, 200, 0.34) 18px
+      rgba(255, 246, 225, 0.3) 0,
+      rgba(255, 246, 225, 0.1) 4px,
+      rgba(110, 70, 30, 0) 8px,
+      rgba(110, 70, 30, 0.09) 12px,
+      rgba(110, 70, 30, 0.03) 15px,
+      rgba(255, 246, 225, 0.3) 18px
     ),
     url("/cardboard-grain.svg");
-  background-size: 960px 820px, 18px 100%, 400px 400px;
+  background-size: 1200px 900px, 18px 100%, 400px 400px;
   background-attachment: fixed, fixed, fixed;
 }
 
@@ -60,32 +60,11 @@ button, input, select { font: inherit; }
 
 .stage { position: relative; min-height: 100vh; }
 
-.doodle-field {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  overflow: hidden;
-}
-
-.doodle-field .doodle,
 .note-band svg,
 .float-note {
   color: var(--coral);
 }
 
-.doodle-field svg {
-  position: absolute;
-  width: 5.5rem;
-  height: auto;
-  fill: currentColor;
-  stroke: var(--ink);
-  stroke-width: 2;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-}
-
-.doodle-field svg path,
 .note-band svg path,
 .float-note path {
   fill: none;
@@ -95,56 +74,18 @@ button, input, select { font: inherit; }
   stroke-linejoin: round;
 }
 
-.doodle-field svg path.flag,
 .note-band svg path.flag,
 .float-note path.flag,
-.doodle-field svg.star path,
 .note-band svg.star path,
 .float-note.star path {
   fill: currentColor;
 }
 
-.doodle-field svg ellipse,
 .note-band svg ellipse,
 .float-note ellipse {
   fill: currentColor;
   stroke: var(--ink);
   stroke-width: 2;
-}
-
-.doodle-field .d1 { top: 4%; left: 3%; color: var(--coral); width: 6.5rem; --tilt: -14deg; }
-.doodle-field .d2 { top: 8%; right: 4%; color: var(--teal); width: 8rem; --tilt: 8deg; }
-.doodle-field .d3 { top: 42%; left: 2%; color: var(--marigold); width: 3.4rem; --tilt: 12deg; }
-.doodle-field .d4 { bottom: 10%; left: 6%; color: var(--cobalt); width: 5rem; --tilt: -8deg; }
-.doodle-field .d5 { bottom: 14%; right: 5%; }
-.doodle-field .d6 { top: 48%; right: 2%; color: var(--grape); width: 7rem; --tilt: -6deg; }
-.doodle-field .d7 { bottom: 8%; right: 18%; color: var(--coral); width: 2.4rem; --tilt: 16deg; }
-.doodle-field .d8 { top: 22%; left: 8%; color: var(--marigold); width: 3.2rem; --tilt: 18deg; }
-
-.doodle-field .doodle {
-  animation: floaty 6s ease-in-out infinite;
-}
-
-.d2, .d4, .d7 { animation-delay: -2s; }
-.d3, .d6 { animation-delay: -4s; }
-
-.disc {
-  position: absolute;
-  width: 7.5rem;
-  height: 7.5rem;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 50% 50%, var(--marigold) 0 16%, var(--paper) 16% 22%, #241c16 22%);
-  box-shadow: inset 0 0 0 3px var(--ink);
-}
-
-.disc::after {
-  content: "";
-  position: absolute;
-  inset: 36%;
-  border-radius: 50%;
-  background: var(--coral);
-  box-shadow: inset 0 0 0 3px var(--ink);
 }
 
 .sheet {
@@ -663,11 +604,6 @@ button, input, select { font: inherit; }
 
 .apple-link { font-size: 1.05rem; }
 
-@keyframes floaty {
-  0%, 100% { transform: translateY(0) rotate(var(--tilt, -8deg)); }
-  50% { transform: translateY(-12px) rotate(var(--tilt, -8deg)); }
-}
-
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @keyframes pulse-load {
@@ -679,10 +615,6 @@ button, input, select { font: inherit; }
   0% { transform: translateY(8px) scale(0.7); opacity: 0; }
   40% { opacity: 1; }
   100% { transform: translateY(-22px) scale(1); opacity: 0; }
-}
-
-@media (max-width: 1040px) {
-  .doodle-field { display: none; }
 }
 
 @media (max-width: 560px) {
@@ -698,7 +630,6 @@ button, input, select { font: inherit; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .doodle-field .doodle,
   .is-playing .record,
   .is-loading .record,
   .is-playing .float-note {
