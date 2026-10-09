@@ -89,6 +89,8 @@ button, input, select { font: inherit; }
 
 .margin-doodles {
   display: none;
+  position: absolute;
+  inset: 0;
   pointer-events: none;
 }
 
@@ -103,14 +105,14 @@ button, input, select { font: inherit; }
   transform: rotate(var(--tilt, 0deg));
 }
 
-.margin-doodle.m1 { top: 1.6rem; right: -12rem; width: 5.6rem; --tilt: 9deg; }
-.margin-doodle.m2 { top: 14rem; left: -13rem; width: 6rem; --tilt: -10deg; }
-.margin-doodle.m3 { top: 27rem; right: -13.5rem; width: 7rem; --tilt: 7deg; }
-.margin-doodle.m4 { top: 38rem; left: -11rem; width: 3.4rem; --tilt: -9deg; }
-.margin-doodle.m5 { bottom: 7rem; right: -12rem; width: 5.6rem; --tilt: -6deg; }
-.margin-doodle.m6 { bottom: 3rem; left: -12rem; width: 4.6rem; --tilt: 8deg; }
+.margin-doodle.m1 { top: 1.6rem; right: 5vw; width: 5.6rem; --tilt: 9deg; }
+.margin-doodle.m2 { top: 14rem; left: 4vw; width: 6rem; --tilt: -10deg; }
+.margin-doodle.m3 { top: 27rem; right: 2.5vw; width: 7rem; --tilt: 7deg; }
+.margin-doodle.m4 { top: 38rem; left: 7vw; width: 3.4rem; --tilt: -9deg; }
+.margin-doodle.m5 { bottom: 7rem; right: 6vw; width: 5.6rem; --tilt: -6deg; }
+.margin-doodle.m6 { bottom: 3rem; left: 3vw; width: 4.6rem; --tilt: 8deg; }
 
-@media (min-width: 1360px) {
+@media (min-width: 1100px) {
   .margin-doodles { display: block; }
 }
 
