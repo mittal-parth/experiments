@@ -1,7 +1,7 @@
 :root {
   --ink: #241c16;
   --paper: #fff6ea;
-  --cardboard: #e9d0a8;
+  --cream: #fbf1dc;
   --coral: #e24b4b;
   --marigold: #f0a202;
   --teal: #1f8a70;
@@ -26,21 +26,10 @@ body {
   min-height: 100vh;
   color: var(--ink);
   font-family: "Drawably Pen", "Segoe Print", ui-sans-serif, system-ui, sans-serif;
-  background-color: var(--cardboard);
-  background-image:
-    url("/cardboard-doodles.svg"),
-    repeating-linear-gradient(
-      90deg,
-      rgba(255, 246, 225, 0.3) 0,
-      rgba(255, 246, 225, 0.1) 4px,
-      rgba(110, 70, 30, 0) 8px,
-      rgba(110, 70, 30, 0.09) 12px,
-      rgba(110, 70, 30, 0.03) 15px,
-      rgba(255, 246, 225, 0.3) 18px
-    ),
-    url("/cardboard-grain.svg");
-  background-size: 1200px 900px, 18px 100%, 400px 400px;
-  background-attachment: fixed, fixed, fixed;
+  background-color: var(--cream);
+  background-image: url("/rough-sheet-grain.svg"), url("/rough-sheet-lines.svg");
+  background-size: 320px 320px, 600px 36px;
+  background-attachment: fixed, scroll;
 }
 
 h1, h2 { font-weight: 400; line-height: 1.05; margin: 0; }
