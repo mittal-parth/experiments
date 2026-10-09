@@ -25,12 +25,10 @@ body {
   min-height: 100vh;
   color: var(--ink);
   font-family: "Drawably Pen", "Segoe Print", ui-sans-serif, system-ui, sans-serif;
-  background:
-    radial-gradient(ellipse at 0% 0%, #ffd7a8 0, transparent 42%),
-    radial-gradient(ellipse at 100% 0%, #b7f0e2 0, transparent 36%),
-    radial-gradient(ellipse at 100% 100%, #ffc9c9 0, transparent 40%),
-    radial-gradient(ellipse at 0% 100%, #d5e0ff 0, transparent 42%),
-    var(--paper);
+  background-color: var(--paper);
+  background-image: url("/paper-grain.svg"), url("/paper-grid.svg");
+  background-size: 320px 320px, 192px 192px;
+  background-attachment: fixed;
 }
 
 h1, h2 { font-weight: 400; line-height: 1.05; margin: 0; }
