@@ -19,7 +19,7 @@ import { cleanCode, cleanNickname } from '@/game/names'
 import type { AnswerMode, ClientMessage, RoomView, SharedGuess } from '@/game/protocol'
 import { standings, winnerText } from '@/game/standings'
 import { ClipPlayer, unlockAudio } from './ClipPlayer'
-import { NoteBand } from './Doodles'
+import { MarginDoodles, NoteBand } from './Doodles'
 import { useRoom } from './useRoom'
 
 const NICK_KEY = 'song-guesser-nick'
@@ -46,6 +46,7 @@ export function GameApp() {
   return (
     <div className="stage">
       <main className="sheet" data-testid="phase" data-phase={phase}>
+        <MarginDoodles />
         <header className="mast">
           <NoteBand />
           <p className="eyebrow">Hear a clip. Name the song, or switch and name the artist.</p>
