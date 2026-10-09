@@ -45,8 +45,8 @@ export function GameApp() {
 
   return (
     <div className="stage">
-      <MarginDoodles />
       <main className="sheet" data-testid="phase" data-phase={phase}>
+        <MarginDoodles />
         <header className="mast">
           <NoteBand />
           <p className="eyebrow">Hear a clip. Name the song, or switch and name the artist.</p>
