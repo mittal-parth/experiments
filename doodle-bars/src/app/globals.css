@@ -1,6 +1,7 @@
 :root {
   --ink: #241c16;
   --paper: #fff6ea;
+  --cardboard: #cf9f68;
   --coral: #e24b4b;
   --marigold: #f0a202;
   --teal: #1f8a70;
@@ -25,10 +26,21 @@ body {
   min-height: 100vh;
   color: var(--ink);
   font-family: "Drawably Pen", "Segoe Print", ui-sans-serif, system-ui, sans-serif;
-  background-color: var(--paper);
-  background-image: url("/paper-grain.svg"), url("/paper-grid.svg");
-  background-size: 320px 320px, 192px 192px;
-  background-attachment: fixed;
+  background-color: var(--cardboard);
+  background-image:
+    url("/cardboard-doodles.svg"),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 236, 200, 0.34) 0,
+      rgba(255, 236, 200, 0.12) 4px,
+      rgba(90, 52, 20, 0) 8px,
+      rgba(90, 52, 20, 0.2) 12px,
+      rgba(90, 52, 20, 0.07) 15px,
+      rgba(255, 236, 200, 0.34) 18px
+    ),
+    url("/cardboard-grain.svg");
+  background-size: 960px 820px, 18px 100%, 400px 400px;
+  background-attachment: fixed, fixed, fixed;
 }
 
 h1, h2 { font-weight: 400; line-height: 1.05; margin: 0; }
@@ -170,7 +182,7 @@ button, input, select { font: inherit; }
   letter-spacing: 0.12em;
   text-transform: uppercase;
   font-size: 0.8rem;
-  color: var(--coral);
+  color: var(--ink);
 }
 
 .stack { display: flex; flex-direction: column; gap: 1rem; }

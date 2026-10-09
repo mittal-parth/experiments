@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="820" viewBox="0 0 960 820">
+  <defs>
+    <filter id="sketch" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="2" seed="11" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="3.5" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <style>
+      .ink, .chalk { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+      .ink { stroke: #4a2a12; stroke-opacity: 0.36; stroke-width: 2.6; }
+      .chalk { stroke: #fff6e2; stroke-opacity: 0.72; stroke-width: 3.2; }
+      .ink .solid { fill: #4a2a12; fill-opacity: 0.3; stroke: none; }
+      .chalk .solid { fill: #fff6e2; fill-opacity: 0.6; stroke: none; }
+    </style>
+  </defs>
+  <g filter="url(#sketch)">
+    <g class="ink" transform="translate(40 40) rotate(-8 60 55)">
+      <path d="M10 72C8 8 112 8 110 72"/>
+      <path d="M20 70C22 22 98 22 100 70" stroke-dasharray="2 9"/>
+      <rect x="2" y="64" width="24" height="42" rx="10"/>
+      <rect x="94" y="64" width="24" height="42" rx="10"/>
+      <path d="M9 78v18M111 78v18"/>
+    </g>
+
+    <g class="chalk" transform="translate(300 30) rotate(6 60 60)">
+      <circle cx="60" cy="60" r="56"/>
+      <path d="M60 14a46 46 0 0 1 46 46" />
+      <path d="M60 106A46 46 0 0 1 14 60" />
+      <circle cx="60" cy="60" r="32" stroke-dasharray="3 7"/>
+      <circle cx="60" cy="60" r="17"/>
+      <circle cx="60" cy="60" r="3" class="solid"/>
+      <path d="M96 22c8 6 14 14 17 24"/>
+    </g>
+
+    <g class="ink" transform="translate(560 40) rotate(10 40 70)">
+      <rect x="22" y="0" width="36" height="66" rx="18"/>
+      <path d="M22 18h36M22 32h36M22 46h36" stroke-dasharray="3 6"/>
+      <path d="M8 44c0 44 64 44 64 0"/>
+      <path d="M40 86v34M18 124h44"/>
+    </g>
+
+    <g class="chalk" transform="translate(790 60) rotate(-4)">
+      <path d="M0 40V20M16 52V8M32 62V0M48 48V14M64 56V4M80 40V24M96 30V34"/>
+    </g>
+
+    <g class="ink" transform="translate(700 210)">
+      <path d="M60 60c0-10 12-10 12 0 0 16-24 16-24-2 0-22 32-22 32 4 0 30-42 30-42-6 0-36 52-36 52 10"/>
+    </g>
+
+    <g class="chalk" transform="translate(110 250) rotate(-10 55 40)">
+      <rect x="0" y="0" width="110" height="72" rx="8"/>
+      <rect x="18" y="10" width="74" height="28" rx="6"/>
+      <circle cx="38" cy="24" r="8"/>
+      <circle cx="72" cy="24" r="8"/>
+      <path d="M22 72l9-20h48l9 20"/>
+      <path d="M44 62h22" stroke-dasharray="2 5"/>
+    </g>
+
+    <g class="ink" transform="translate(420 250) rotate(-6)">
+      <ellipse cx="14" cy="64" rx="15" ry="10" transform="rotate(-24 14 64)"/>
+      <ellipse cx="14" cy="64" rx="6" ry="3" class="solid" transform="rotate(-24 14 64)"/>
+      <path d="M27 58V0c10 4 20 10 20 26 0-8-6-12-20-16"/>
+      <ellipse cx="68" cy="82" rx="15" ry="10" transform="rotate(-24 68 82)"/>
+      <path d="M81 76V18c10 4 20 10 20 26 0-8-6-12-20-16"/>
+    </g>
+
+    <g class="chalk" transform="translate(620 300) rotate(14)">
+      <path d="M26 0L2 46h20L10 92 46 34H26z"/>
+    </g>
+
+    <g class="ink" transform="translate(800 340) rotate(-12)">
+      <path d="M40 24C0 -6-24 34 40 76 104 34 80-6 40 24z" transform="translate(-0 0) scale(0.8)"/>
+      <path d="M12 26c-4 6-4 14 0 20" stroke-opacity="0.2"/>
+    </g>
+
+    <g class="chalk" transform="translate(40 470)">
+      <path d="M0 14q12-20 24 0t24 0 24 0 24 0 24 0"/>
+    </g>
+
+    <g class="ink" transform="translate(250 470) rotate(5 50 50)">
+      <path d="M50 4l13 30 33 3-25 22 8 32-29-17-29 17 8-32L4 37l33-3z"/>
+      <path d="M50 22l6 14" stroke-opacity="0.2"/>
+    </g>
+
+    <g class="chalk" transform="translate(470 470) rotate(-8 50 50)">
+      <circle cx="30" cy="62" r="26"/>
+      <path d="M30 62l32-40"/>
+      <path d="M48 28c14-10 24 0 30 6" />
+      <path d="M62 0l6 14 14 6-14 6-6 14-6-14-14-6 14-6z" stroke-opacity="0.4"/>
+    </g>
+
+    <g class="ink" transform="translate(690 470) rotate(8)">
+      <path d="M0 60c20-50 70-60 110-30"/>
+      <path d="M96 22l16 8-12 14"/>
+      <path d="M2 80c26 10 70 8 108-20" stroke-dasharray="3 9"/>
+    </g>
+
+    <g class="chalk" transform="translate(60 650) rotate(-5)">
+      <path d="M0 0c18 10 26 30 22 60"/>
+      <path d="M14 50l8 12 10-14"/>
+      <circle cx="80" cy="30" r="16"/>
+      <path d="M80 0v-12M80 60v12M50 30h-12M110 30h12M59 9l-9-9M101 51l9 9M101 9l9-9M59 51l-9 9"/>
+    </g>
+
+    <g class="ink" transform="translate(300 640) rotate(4)">
+      <path d="M0 40c0-30 40-30 40 0 18-18 52 4 36 26H8C-4 66 -4 52 0 40z"/>
+      <path d="M96 20l6-10M112 24l12-6M118 40l12 0" stroke-opacity="0.25"/>
+    </g>
+
+    <g class="chalk" transform="translate(520 640)">
+      <path d="M0 14L28 0M0 14l28 14M0 14h60" transform="translate(0 20) scale(0.6)"/>
+      <path d="M80 20l6 14 14 6-14 6-6 14-6-14-14-6 14-6z"/>
+      <path d="M140 60l4 9 9 4-9 4-4 9-4-9-9-4 9-4z"/>
+    </g>
+
+    <g class="ink" transform="translate(720 640) rotate(-10)">
+      <path d="M0 50V6l50-8v44"/>
+      <ellipse cx="-8" cy="52" rx="14" ry="9" transform="rotate(-20 -8 52)"/>
+      <ellipse cx="42" cy="44" rx="14" ry="9" transform="rotate(-20 42 44)"/>
+      <path d="M0 22l50-8" />
+    </g>
+
+    <g class="ink" transform="translate(880 520)">
+      <path d="M0 0l16 16M16 0L0 16"/>
+      <path d="M-40 60l16 16M-24 60L-40 76"/>
+      <circle cx="10" cy="120" r="9"/>
+    </g>
+
+    <g class="chalk" transform="translate(205 130)">
+      <circle cx="0" cy="0" r="3" class="solid"/>
+      <circle cx="26" cy="12" r="3" class="solid"/>
+      <circle cx="10" cy="34" r="3" class="solid"/>
+    </g>
+  </g>
+</svg>
