@@ -115,6 +115,50 @@ test('a room link joins, the timer stops after a correct guess, and the leaderbo
   await guestContext.close()
 })
 
+test('solid buttons keep their drawn background when the label changes', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('nickname').fill('Aman')
+  await page.getByTestId('play-solo').click()
+  await page.getByTestId('start-game').click()
+  await expect(page.getByTestId('clip-status')).toHaveText('playing')
+  const sketches = (testId: string) => page.getByTestId(testId).locator('svg.drawably-svg')
+  await expect(sketches('play-clip')).toHaveCount(1)
+  await expect(page.getByTestId('play-clip')).toHaveText('Playing')
+  await page.getByTestId('guess-input').fill('Kesariya')
+  await page.getByTestId('guess-submit').click()
+  await expect(page.getByTestId('reveal-title')).toHaveText('Kesariya')
+  await expect(sketches('next-round')).toHaveCount(1)
+  const label = page.getByTestId('next-round').locator('.btn-label')
+  await expect(label).toHaveText('Next song')
+})
+
+test('guests see disabled settings and a chick next to zero scores', async ({ browser }) => {
+  const hostContext = await browser.newContext()
+  const guestContext = await browser.newContext()
+  const host = await hostContext.newPage()
+  const guest = await guestContext.newPage()
+
+  await host.goto('/')
+  await host.getByTestId('nickname').fill('Aman')
+  await host.getByTestId('host-room').click()
+  const code = (await host.getByTestId('room-code').textContent())?.trim() ?? ''
+  await guest.goto(`/?code=${code}`)
+  await guest.getByTestId('nickname').fill('Riya')
+  await guest.getByTestId('join-room').click()
+  await expect(guest.getByTestId('scoreboard')).toContainText('Aman')
+
+  await expect(host.getByTestId('playlist')).toBeEnabled()
+  await expect(host.getByTestId('host-only-hint')).toHaveCount(0)
+  await expect(guest.getByTestId('playlist')).toBeDisabled()
+  await expect(guest.getByTestId('host-only-hint')).toBeVisible()
+  await expect(guest.locator('.drawably-select')).toHaveCSS('opacity', '0.5')
+  await expect(guest.getByTestId('clip-3')).toBeDisabled()
+  await expect(guest.getByTestId('scoreboard')).toContainText('Riya 0🐥')
+
+  await hostContext.close()
+  await guestContext.close()
+})
+
 test('naming the artist scores fewer points and the revealed song is remembered', async ({ page }) => {
   const sent: string[] = []
   page.on('websocket', (ws) => {
