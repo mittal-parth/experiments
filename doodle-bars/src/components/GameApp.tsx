@@ -21,6 +21,7 @@ import { standings, winnerText } from '@/game/standings'
 import { AppButton } from './AppButton'
 import { ClipPlayer, unlockAudio } from './ClipPlayer'
 import { MarginDoodles, NoteBand } from './Doodles'
+import { FollowCorner } from './FollowCorner'
 import { useRoom } from './useRoom'
 
 const NICK_KEY = 'song-guesser-nick'
@@ -73,6 +74,7 @@ export function GameApp() {
           connected={room.connected}
         />
       </main>
+      <FollowCorner />
     </div>
   )
 }
