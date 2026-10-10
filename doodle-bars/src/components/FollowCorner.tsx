@@ -1,5 +1,5 @@
 // The X and GitHub marks stay the official shapes and a single ink color.
-// The handwriting, arrow, and pill are the doodle; the logos are not.
+// The pill is the doodle; the logos are not.
 
 const X_URL = 'https://x.com/mittalparth'
 const REPO_URL = 'https://github.com/mittal-parth/experiments'
@@ -7,11 +7,6 @@ const REPO_URL = 'https://github.com/mittal-parth/experiments'
 export function FollowCorner() {
   return (
     <aside className="follow" data-testid="follow">
-      <p className="follow-note">follow me on x</p>
-      <svg className="follow-arrow" viewBox="0 0 52 26" aria-hidden="true">
-        <path d="M4 7c12 1 22 6 34 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-        <path d="M30 13l9 7-10 1.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
       <div className="follow-pill">
         <svg className="follow-pill-edge" viewBox="0 0 78 36" aria-hidden="true">
           <path
