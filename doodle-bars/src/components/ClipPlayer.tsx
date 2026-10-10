@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { DrawablyButton } from 'drawably/react'
 import { assertNever } from '@/game/assert-never'
 import { clipStartSeconds } from '@/game/clip'
+import { AppButton } from './AppButton'
 import { NoteIcon } from './Doodles'
 
 type ClipStatus = 'loading' | 'ready' | 'playing' | 'done' | 'unavailable'
@@ -206,7 +206,7 @@ export function ClipPlayer({ url, seconds }: { url: string; seconds: number }) {
           <NoteIcon className="float-note fn3" />
         </div>
         <div className="player-copy">
-          <DrawablyButton
+          <AppButton
             type="button"
             variant="solid"
             data-testid="play-clip"
@@ -218,7 +218,7 @@ export function ClipPlayer({ url, seconds }: { url: string; seconds: number }) {
             disabled={status === 'playing'}
           >
             {clipLabel(status)}
-          </DrawablyButton>
+          </AppButton>
           {status === 'loading' ? <p className="quiet">Loading the preview…</p> : null}
           {status === 'unavailable' ? <p className="quiet">The preview didn’t load. Tap play to try again.</p> : null}
         </div>
