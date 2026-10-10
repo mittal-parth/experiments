@@ -9,7 +9,7 @@ test('the home page has a favicon and a large link preview', async ({ page }) =>
   await expect(page).toHaveTitle(title)
   await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', description)
   await expect(page.locator('meta[name="keywords"]')).toHaveAttribute('content', /song guesser/)
-  await expect(page.locator('meta[name="author"]')).toHaveAttribute('content', 'mittalparth')
+  await expect(page.locator('meta[name="author"]')).toHaveAttribute('content', 'mittalparth_')
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', new RegExp(`^${site}/?$`))
   await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content', new RegExp(`^${site}/?$`))
   await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', title)
@@ -18,11 +18,11 @@ test('the home page has a favicon and a large link preview', async ({ page }) =>
   await expect(page.locator('meta[property="og:image:height"]')).toHaveAttribute('content', '630')
   await expect(page.locator('meta[property="og:image:alt"]')).toHaveAttribute('content', /Song Guesser/)
   await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute('content', 'summary_large_image')
-  await expect(page.locator('meta[name="twitter:site"]')).toHaveAttribute('content', '@mittalparth')
-  await expect(page.locator('meta[name="twitter:creator"]')).toHaveAttribute('content', '@mittalparth')
+  await expect(page.locator('meta[name="twitter:site"]')).toHaveAttribute('content', '@mittalparth_')
+  await expect(page.locator('meta[name="twitter:creator"]')).toHaveAttribute('content', '@mittalparth_')
   const linkedData = await page.locator('script[type="application/ld+json"]').evaluate((node) => node.textContent ?? '')
   expect(linkedData).toContain(site)
-  await expect(page.getByRole('link', { name: 'mittalparth on X' })).toHaveAttribute('href', 'https://x.com/mittalparth')
+  await expect(page.getByRole('link', { name: 'mittalparth_ on X' })).toHaveAttribute('href', 'https://x.com/mittalparth_')
   await expect(page.getByRole('link', { name: 'Song Guesser on GitHub' })).toHaveAttribute(
     'href',
     'https://github.com/mittal-parth/experiments',

@@ -46,8 +46,8 @@ export const metadata: Metadata = {
     'multiplayer music game',
     'guess the artist',
   ],
-  authors: [{ name: 'mittalparth', url: 'https://x.com/mittalparth' }],
-  creator: 'mittalparth',
+  authors: [{ name: 'mittalparth_', url: 'https://x.com/mittalparth_' }],
+  creator: 'mittalparth_',
   category: 'games',
   alternates: { canonical: '/' },
   robots: { index: true, follow: true },
@@ -63,8 +63,8 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title,
     description,
-    site: '@mittalparth',
-    creator: '@mittalparth',
+    site: '@mittalparth_',
+    creator: '@mittalparth_',
   },
 }
 

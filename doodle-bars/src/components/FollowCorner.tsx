@@ -1,7 +1,7 @@
 // The X and GitHub marks stay the official shapes and a single ink color.
 // The pill is the doodle; the logos are not.
 
-const X_URL = 'https://x.com/mittalparth'
+const X_URL = 'https://x.com/mittalparth_'
 const REPO_URL = 'https://github.com/mittal-parth/experiments'
 
 export function FollowCorner() {
@@ -17,7 +17,7 @@ export function FollowCorner() {
             strokeLinejoin="round"
           />
         </svg>
-        <a href={X_URL} target="_blank" rel="noopener noreferrer" aria-label="mittalparth on X">
+        <a href={X_URL} target="_blank" rel="noopener noreferrer" aria-label="mittalparth_ on X">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path
               fill="currentColor"
