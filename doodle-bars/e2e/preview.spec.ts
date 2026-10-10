@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 const description = 'Hear a clip and guess the song! Play solo or with friends :)'
-const title = 'Song Guesser — guess the song from a clip'
+const title = 'Song Guesser'
 const site = 'https://song.mittalparth.dev'
 
 test('the home page has a favicon and a large link preview', async ({ page }) => {

@@ -5,7 +5,7 @@ import 'drawably/style.css'
 import './globals.css'
 
 const siteUrl = new URL('https://song.mittalparth.dev')
-const title = 'Song Guesser — guess the song from a clip'
+const title = 'Song Guesser'
 const description = 'Hear a clip and guess the song! Play solo or with friends :)'
 
 const jsonLd = {
