@@ -9,7 +9,6 @@ import {
   DrawablySelect,
 } from 'drawably/react'
 import { playlistChoices } from '@/catalog/public'
-import { assertNever } from '@/game/assert-never'
 import { allowsArtistGuess } from '@/game/playlist-rules'
 import { BEST_KEY, bestScore, readStoredBest, withBest, type BestBoard } from '@/game/best'
 import { CLIP_CHOICES, DEFAULT_CLIP_SECONDS, DEFAULT_ROUNDS, ROUND_CHOICES } from '@/game/constants'
@@ -65,6 +64,11 @@ export function GameApp() {
           </p>
         ) : null}
         {!room.connected && phase === 'home' ? <p className="quiet">Connecting…</p> : null}
+        {room.view && !room.connected ? (
+          <p className="quiet" data-testid="reconnecting">
+            Reconnecting…
+          </p>
+        ) : null}
         <Screen
           view={room.view}
           send={room.send}
@@ -104,8 +108,10 @@ function Screen({
       return <Reveal view={view} send={send} waiting={waiting} />
     case 'done':
       return <Done view={view} send={send} leave={leave} waiting={waiting} connected={connected} />
-    default:
-      return assertNever(view.phase)
+    default: {
+      const unexpected: never = view.phase
+      throw new Error(`Unexpected value: ${JSON.stringify(unexpected)}`)
+    }
   }
 }
 
@@ -875,8 +881,10 @@ function guessTag(kind: SharedGuess['kind'], points: number): string | null {
       return points > 0 ? `Artist · ${points}` : 'Already named'
     case 'song':
       return 'Song title'
-    default:
-      return assertNever(kind)
+    default: {
+      const unexpected: never = kind
+      throw new Error(`Unexpected value: ${JSON.stringify(unexpected)}`)
+    }
   }
 }
 
