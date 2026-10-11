@@ -1,4 +1,3 @@
-import { assertNever } from './assert-never'
 import { clampClipSeconds } from './clip'
 
 export type PointReason = 'title' | 'later' | 'artist'
@@ -21,8 +20,10 @@ export function pointsForGuess(
       return Math.max(50, Math.round(base * 0.6))
     case 'artist':
       return Math.max(25, Math.round(base * ARTIST_POINT_RATIO))
-    default:
-      return assertNever(reason)
+    default: {
+      const unexpected: never = reason
+      throw new Error(`Unexpected value: ${JSON.stringify(unexpected)}`)
+    }
   }
 }
 

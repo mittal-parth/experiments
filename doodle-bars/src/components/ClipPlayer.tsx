@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { DrawablyButton } from 'drawably/react'
-import { assertNever } from '@/game/assert-never'
 import { clipStartSeconds } from '@/game/clip'
 import { NoteIcon } from './Doodles'
 
@@ -36,8 +35,10 @@ function clipLabel(status: ClipStatus): string {
       return 'Play again'
     case 'unavailable':
       return 'Play clip'
-    default:
-      return assertNever(status)
+    default: {
+      const unexpected: never = status
+      throw new Error(`Unexpected value: ${JSON.stringify(unexpected)}`)
+    }
   }
 }
 

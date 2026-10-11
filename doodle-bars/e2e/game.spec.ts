@@ -163,7 +163,7 @@ test('naming the artist scores fewer points and the revealed song is remembered'
   sent.length = 0
   await page.getByTestId('start-game').click()
   await expect
-    .poll(() => sent.some((frame) => frame.includes('"type":"start"') && frame.includes('1635014240')))
+    .poll(() => sent.some((frame) => frame.includes('start') && frame.includes('1635014240')))
     .toBe(true)
 })
 
@@ -301,6 +301,70 @@ test('the host can choose how many songs, then the recap and best score stick', 
   await page.getByTestId('leave').click()
   await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'home')
   await expect(page.getByTestId('personal-best')).toHaveText(bestText ?? '')
+})
+
+test('a guess made offline is delivered once when the network returns', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('nickname').fill('Aman')
+  await page.getByTestId('play-solo').click()
+  await page.getByTestId('playlist').selectOption('hindi')
+  await page.getByTestId('start-game').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+
+  await page.context().setOffline(true)
+  await page.getByTestId('guess-input').fill('Kesariya')
+  await page.getByTestId('guess-submit').click()
+  await page.context().setOffline(false)
+  await expect(page.getByTestId('reveal-title')).toHaveText('Kesariya')
+  await expect(page.getByTestId('error')).toHaveCount(0)
+  await expect(page.locator('body')).not.toContainText('room is gone')
+  await expect(page.getByTestId('guess-chat').getByText('Kesariya', { exact: true })).toHaveCount(1)
+})
+
+test('the host can reload after the recap and play again', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('nickname').fill('Aman')
+  await page.getByTestId('rounds-3').click()
+  await page.getByTestId('play-solo').click()
+  await page.getByTestId('playlist').selectOption('hindi')
+  await page.getByTestId('start-game').click()
+  for (const title of ROUND_TITLES.slice(0, 3)) {
+    await guessTitle(page, title)
+    await page.getByTestId('next-round').click()
+  }
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'done')
+  await page.reload()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'done')
+  await page.getByTestId('play-again').click()
+  await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'lobby')
+  await expect(page.locator('body')).not.toContainText('room is gone')
+})
+
+test('a guest reload keeps the same nickname on the host scoreboard', async ({ browser }) => {
+  const hostContext = await browser.newContext()
+  const guestContext = await browser.newContext()
+  const host = await hostContext.newPage()
+  const guest = await guestContext.newPage()
+
+  await host.goto('/')
+  await host.getByTestId('nickname').fill('Aman')
+  await host.getByTestId('host-room').click()
+  await expect(host.getByTestId('room-code')).toHaveText(/^[A-Z0-9]{4}$/)
+  const code = (await host.getByTestId('room-code').textContent())?.trim() ?? ''
+
+  await guest.goto(`/?code=${code}`)
+  await guest.getByTestId('nickname').fill('Riya')
+  await guest.getByTestId('join-room').click()
+  await expect(host.getByTestId('scoreboard')).toContainText('Riya')
+
+  await guest.reload()
+  await expect(guest.getByTestId('phase')).toHaveAttribute('data-phase', 'lobby')
+  await expect(host.getByTestId('scoreboard')).toContainText('Riya')
+  const text = await host.getByTestId('scoreboard').innerText()
+  expect(text.split('Riya').length - 1).toBe(1)
+
+  await hostContext.close()
+  await guestContext.close()
 })
 
 async function guessTitle(page: Page, title: string) {

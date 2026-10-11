@@ -1,4 +1,3 @@
-import { assertNever } from './assert-never'
 import { DEFAULT_ROUNDS } from './constants'
 
 export type Phase = 'lobby' | 'playing' | 'reveal' | 'done'
@@ -233,8 +232,10 @@ export function stampSession(
     case 'resume':
     case 'leave':
       return message
-    default:
-      return assertNever(message)
+    default: {
+      const unexpected: never = message
+      throw new Error(`Unexpected value: ${JSON.stringify(unexpected)}`)
+    }
   }
 }
 
@@ -254,8 +255,10 @@ function withClaim(message: ClientMessage, value: Record<string, unknown>): Clie
     case 'resume':
     case 'leave':
       return message
-    default:
-      return assertNever(message)
+    default: {
+      const unexpected: never = message
+      throw new Error(`Unexpected value: ${JSON.stringify(unexpected)}`)
+    }
   }
 }
 
