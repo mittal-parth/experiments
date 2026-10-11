@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 import {
-  DrawablyButton,
   DrawablyCard,
   DrawablyCircle,
   DrawablyHighlight,
@@ -16,9 +15,12 @@ import { CLIP_CHOICES, DEFAULT_CLIP_SECONDS, DEFAULT_ROUNDS, ROUND_CHOICES } fro
 import { HEARD_STORAGE_KEY, heardIds, storeHeard } from '@/game/heard'
 import { cleanCode, cleanNickname } from '@/game/names'
 import type { AnswerMode, ClientMessage, RoomView, SharedGuess } from '@/game/protocol'
+import { scoreBadge } from '@/game/score-badge'
 import { standings, winnerText } from '@/game/standings'
+import { AppButton } from './AppButton'
 import { ClipPlayer, unlockAudio } from './ClipPlayer'
 import { MarginDoodles, NoteBand } from './Doodles'
+import { FollowCorner } from './FollowCorner'
 import { useRoom } from './useRoom'
 
 const NICK_KEY = 'song-guesser-nick'
@@ -76,6 +78,7 @@ export function GameApp() {
           connected={room.connected}
         />
       </main>
+      <FollowCorner />
     </div>
   )
 }
@@ -213,7 +216,7 @@ function Home({
         </div>
       </DrawablyCard>
       <div className="row actions">
-        <DrawablyButton
+        <AppButton
           type="button"
           variant="solid"
           data-testid="play-solo"
@@ -225,8 +228,8 @@ function Home({
           onClick={() => create('solo')}
         >
           {waiting ? (connected ? 'Starting…' : 'Connecting…') : 'Play solo'}
-        </DrawablyButton>
-        <DrawablyButton
+        </AppButton>
+        <AppButton
           type="button"
           variant="solid"
           data-testid="host-room"
@@ -238,7 +241,7 @@ function Home({
           onClick={() => create('room')}
         >
           {waiting ? (connected ? 'Starting…' : 'Connecting…') : 'Host a room'}
-        </DrawablyButton>
+        </AppButton>
       </div>
       <DrawablyCard className="panel panel-rose" seed={9} stroke="#c44536" fill="#e24b4b">
         <div className="stack tight">
@@ -259,7 +262,7 @@ function Home({
                 }}
               />
             </label>
-            <DrawablyButton
+            <AppButton
               type="button"
               variant="solid"
               data-testid="join-room"
@@ -271,7 +274,7 @@ function Home({
               onClick={join}
             >
               {waiting ? (connected ? 'Joining…' : 'Connecting…') : 'Join'}
-            </DrawablyButton>
+            </AppButton>
           </div>
         </div>
       </DrawablyCard>
@@ -334,12 +337,17 @@ function Lobby({
               send(settings(view, { roundCount }))
             }}
           />
+          {!view.you.isHost ? (
+            <p className="quiet host-hint" data-testid="host-only-hint">
+              Only the host can change these settings.
+            </p>
+          ) : null}
           <Scoreboard view={view} />
         </div>
       </DrawablyCard>
       <div className="row">
         {view.you.isHost ? (
-          <DrawablyButton
+          <AppButton
             type="button"
             variant="solid"
             data-testid="start-game"
@@ -357,13 +365,13 @@ function Lobby({
             }}
           >
             {view.starting ? 'Finding a song…' : 'Start'}
-          </DrawablyButton>
+          </AppButton>
         ) : (
           <p className="quiet">Waiting for the host.</p>
         )}
-        <DrawablyButton type="button" data-testid="leave" onClick={leave}>
+        <AppButton type="button" data-testid="leave" onClick={leave}>
           Leave
-        </DrawablyButton>
+        </AppButton>
       </div>
     </div>
   )
@@ -457,7 +465,7 @@ function Playing({
               />
             </label>
             <div>
-              <DrawablyButton
+              <AppButton
                 type="submit"
                 variant="solid"
                 data-testid="guess-submit"
@@ -468,7 +476,7 @@ function Playing({
                 disabled={youSolved || waiting}
               >
                 {waiting ? 'Sending…' : 'Guess'}
-              </DrawablyButton>
+              </AppButton>
             </div>
           </div>
         </DrawablyCard>
@@ -514,7 +522,7 @@ function Reveal({
       <Feedback last={view.lastGuess} />
       <Scoreboard view={view} />
       {view.you.isHost ? (
-        <DrawablyButton
+        <AppButton
           type="button"
           variant="solid"
           data-testid="next-round"
@@ -530,7 +538,7 @@ function Reveal({
           }}
         >
           {waiting ? (finishing ? 'Finishing…' : 'Loading song…') : finishing ? 'Finish' : 'Next song'}
-        </DrawablyButton>
+        </AppButton>
       ) : (
         <p className="quiet">Waiting for the host.</p>
       )}
@@ -559,10 +567,12 @@ function Done({
       {headline ? (
         <p className="winner-line" data-testid="winner">
           {headline}
+          <ZeroBadge score={ranked[0]?.score ?? 0} />
         </p>
       ) : (
         <p className="winner-line" data-testid="winner">
           You scored {view.players[0]?.score ?? 0}
+          <ZeroBadge score={view.players[0]?.score ?? 0} />
         </p>
       )}
       <Cover url={view.artworkUrl} />
@@ -571,14 +581,17 @@ function Done({
           <li key={player.id} className={player.id === view.you.id ? 'you' : undefined}>
             <span className="place">{player.place}</span>
             <span>{player.nickname}</span>
-            <span>{player.score}</span>
+            <span>
+              {player.score}
+              <ZeroBadge score={player.score} />
+            </span>
           </li>
         ))}
       </ol>
       <Setlist rounds={view.recap} />
       <div className="row">
         {view.you.isHost ? (
-          <DrawablyButton
+          <AppButton
             type="button"
             variant="solid"
             data-testid="play-again"
@@ -593,13 +606,13 @@ function Done({
             }}
           >
             {waiting ? (connected ? 'Starting…' : 'Connecting…') : 'Play again'}
-          </DrawablyButton>
+          </AppButton>
         ) : (
           <p className="quiet">Waiting for the host.</p>
         )}
-        <DrawablyButton type="button" data-testid="leave" onClick={leave}>
+        <AppButton type="button" data-testid="leave" onClick={leave}>
           Leave
-        </DrawablyButton>
+        </AppButton>
       </div>
     </div>
   )
@@ -650,7 +663,7 @@ function AnswerField({
         {choices.map((choice) => {
           const locked = choice.id === 'artist' && !allowArtist
           return (
-            <DrawablyButton
+            <AppButton
               key={choice.id}
               type="button"
               data-testid={`answer-${choice.id}`}
@@ -667,7 +680,7 @@ function AnswerField({
               }}
             >
               {choice.label}
-            </DrawablyButton>
+            </AppButton>
           )
         })}
       </div>
@@ -731,7 +744,7 @@ function RoundField({
       <span>Songs</span>
       <div className="row clip-choices">
         {ROUND_CHOICES.map((choice) => (
-          <DrawablyButton
+          <AppButton
             key={choice}
             type="button"
             data-testid={`rounds-${choice}`}
@@ -747,7 +760,7 @@ function RoundField({
             }}
           >
             {choice}
-          </DrawablyButton>
+          </AppButton>
         ))}
       </div>
     </div>
@@ -768,7 +781,7 @@ function ClipField({
       <span>Clip length</span>
       <div className="row clip-choices">
         {CLIP_CHOICES.map((choice) => (
-          <DrawablyButton
+          <AppButton
             key={choice}
             type="button"
             data-testid={`clip-${choice}`}
@@ -784,7 +797,7 @@ function ClipField({
             }}
           >
             {choice}s
-          </DrawablyButton>
+          </AppButton>
         ))}
       </div>
     </div>
@@ -1019,6 +1032,16 @@ function PersonalBest({
   )
 }
 
+function ZeroBadge({ score }: { score: number }) {
+  const badge = scoreBadge(score)
+  if (!badge) return null
+  return (
+    <span className="zero-badge" role="img" aria-label="No points">
+      {badge}
+    </span>
+  )
+}
+
 function Scoreboard({ view }: { view: RoomView }) {
   const rows = standings(view.players)
   return (
@@ -1031,6 +1054,7 @@ function Scoreboard({ view }: { view: RoomView }) {
         >
           <span className="swatch" aria-hidden="true" />
           {player.nickname} {player.score}
+          <ZeroBadge score={player.score} />
           {player.solved ? ' · got it' : ''}
           {!player.solved && player.namedArtist ? ' · artist' : ''}
           {!player.connected ? ' · away' : ''}
