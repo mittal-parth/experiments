@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { captureGameEvent } from '@/analytics/posthog-client'
 import { clipStartSeconds } from '@/game/clip'
 import { AppButton } from './AppButton'
 import { NoteIcon } from './Doodles'
@@ -161,6 +162,7 @@ export function ClipPlayer({ url, seconds }: { url: string; seconds: number }) {
   }, [url, seconds])
 
   function play() {
+    captureGameEvent('clip_played', { clip_seconds: seconds })
     const audio = audioElement()
     pendingPlay.current = true
     if (audio.error) {
