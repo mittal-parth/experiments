@@ -27,6 +27,13 @@ const MSG_LIMIT = 32
 const REAP_MS = 6 * 60 * 60 * 1000
 const ACTION_TIMEOUT_MS = 120_000
 
+type RoomVars = {
+  pendingMsgIds: Set<string>
+  /** Resolves once this wake has finished arming timers. Actions await it before using SQLite schedule. */
+  clocks: Promise<void>
+  settleClocks: (() => void) | null
+}
+
 /** One persisted room, keyed by its 4-character code. */
 export const gameRoom = actor({
   options: { actionTimeout: ACTION_TIMEOUT_MS },
@@ -40,7 +47,7 @@ export const gameRoom = actor({
   },
   /**
    * Once, when the actor is first created. Returns the saved room.
-   * `onCreate` runs after this.
+   * `onWake` runs after this.
    */
   createState: (c, input: GameRoomInput): GameRoomState => {
     // validate user nickname
@@ -74,33 +81,31 @@ export const gameRoom = actor({
       lastSeenAt: Date.now(),
     }
   },
+  /** In-memory only. Lost on sleep. Holds in-flight guesses and the timer gate for this wake. */
+  createVars: (): RoomVars => ({
+    pendingMsgIds: new Set<string>(),
+    clocks: Promise.resolve(),
+    settleClocks: null,
+  }),
   /**
    * Every new socket. Saves `{ playerId, intent }` on that connection, not on the room.
-   * `onCreate` runs once for the room. This runs again for each browser.
    */
-  /** In-memory only. Holds a msgId while a guess or next is waiting on the round timer. */
-  createVars: () => ({ pendingMsgIds: new Set<string>() }),
   createConnState: (_c, params: ConnParams): ConnParams => {
     const parsed = readParams(params)
     if (!parsed) throw new UserError('Join a room first')
     return parsed
   },
   /**
-   * Once, after `createState`. No socket yet. Starts the 6-hour idle timer.
-   * A later restart runs `onWake` instead of this.
-   * The id is written after `schedule.after` resolves. Writing it first queues a
-   * state save that runs on the next turn, overlapping the SQLite schedule call.
+   * Every time the actor starts, including the first create, sleep, or a process restart.
+   * Catches a finished round, and marks everyone away if no socket is open.
+   * A room left in `starting` is put back in the lobby so a timed-out song load can be retried.
+   *
+   * Does not await `c.schedule`. Rivet marks the actor started before this hook and then
+   * gives the browser socket 5 seconds (`onConnectTimeout`). The socket stays queued until
+   * this hook returns, so a SQLite schedule here becomes "actor websocket connection setup
+   * timed out". `run` arms the timers after the socket is free to connect.
    */
-  onCreate: async (c) => {
-    c.state.reapScheduleId = await c.schedule.after(REAP_MS, '_reap')
-  },
-  /**
-   * Every time the actor starts, including after sleep or a process restart.
-   * `onCreate` does not run again. Catches a finished round, and marks everyone away if no socket is open.
-   * Schedule calls finish before any state write. A room left in `starting` is put back in the lobby
-   * so a timed-out song load can be retried after the actor wakes.
-   */
-  onWake: async (c) => {
+  onWake: (c) => {
     let room = currentRoom(c.state.room)
     let recentMsgIds: GameRoomState['recentMsgIds'] | null = null
     if (room.starting) {
@@ -116,13 +121,31 @@ export const gameRoom = actor({
       }
     }
     room = syncPhase(room, Date.now())
-    const roundScheduleId = await scheduleFor(c, room)
-    const reapScheduleId = await replaceReap(c, REAP_MS)
     c.state.room = room
-    c.state.roundScheduleId = roundScheduleId
-    c.state.reapScheduleId = reapScheduleId
     if (recentMsgIds) c.state.recentMsgIds = recentMsgIds
     if (typeof c.state.lastSeenAt !== 'number') c.state.lastSeenAt = Date.now()
+    const previous = c.vars.settleClocks
+    let settle: () => void = () => {}
+    c.vars.clocks = new Promise<void>((resolve) => {
+      settle = resolve
+    })
+    c.vars.settleClocks = settle
+    previous?.()
+  },
+  /**
+   * After startup. Arms the round timer and the idle timer once the state save from
+   * `onWake` has finished, so those SQLite calls do not overlap that save and do not
+   * hold the browser socket.
+   */
+  run: async (c) => {
+    const settle = c.vars.settleClocks
+    try {
+      await armClocks(c)
+    } catch (error) {
+      console.error('failed to arm room timers', error)
+    } finally {
+      settle?.()
+    }
   },
   /**
    * Before the socket is accepted. Resume is refused when that player has no seat.
@@ -234,6 +257,7 @@ export const gameRoom = actor({
      * Forgets `msgId` if loading fails so the same command can be retried.
      */
     start: async (c, msgId: string, avoidTrackIds: number[]) => {
+      await readyClocks(c)
       const playerId = seated(c)
       if (!playerId) return
 
@@ -305,6 +329,7 @@ export const gameRoom = actor({
      * Records one guess. A repeated `msgId` re-sends the current view and does not score again.
      */
     guess: async (c, msgId: string, text: string) => {
+      await readyClocks(c)
       const playerId = seated(c)
       if (!playerId) return
       if (duplicate(c, playerId, msgId) || !claim(c, playerId, msgId)) {
@@ -336,6 +361,7 @@ export const gameRoom = actor({
      * Advances to the next round when `roundNumber` is the one on screen, then reschedules the deadline.
      */
     next: async (c, msgId: string, roundNumber: number) => {
+      await readyClocks(c)
       const playerId = seated(c)
       if (!playerId) return
       if (duplicate(c, playerId, msgId) || !claim(c, playerId, msgId)) {
@@ -545,6 +571,24 @@ async function cancelSchedule(c: ClockCtx, id: string | null): Promise<void> {
   } catch {
     // The timer already fired.
   }
+}
+
+/**
+ * Persists the wake, then arms the round timer and the idle timer.
+ * `saveState` finishes before either schedule call so the two SQLite users do not overlap.
+ */
+async function armClocks(c: ClockCtx & { saveState: (opts?: { immediate?: boolean }) => Promise<void> }): Promise<void> {
+  await c.saveState({ immediate: true })
+  const room = currentRoom(c.state.room)
+  const roundScheduleId = await scheduleFor(c, room)
+  const reapScheduleId = await replaceReap(c, REAP_MS)
+  c.state.roundScheduleId = roundScheduleId
+  c.state.reapScheduleId = reapScheduleId
+}
+
+/** Waits until this wake's timers are armed so a later schedule does not overlap that SQLite work. */
+async function readyClocks(c: { vars: RoomVars }): Promise<void> {
+  await c.vars.clocks
 }
 
 /**
