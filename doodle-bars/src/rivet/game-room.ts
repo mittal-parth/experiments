@@ -26,6 +26,16 @@ import type { ActionCtx, ClockCtx, ConnParams, GameRoomInput, GameRoomState, Roo
 const MSG_LIMIT = 32
 const REAP_MS = 6 * 60 * 60 * 1000
 const ACTION_TIMEOUT_MS = 120_000
+/** How long start, guess, and next wait for timers. Far inside the 120s action timeout. */
+const CLOCK_MS = 5_000
+const CLOCKS_NOT_READY = 'The room is still starting. Try again.'
+
+type RoomVars = {
+  pendingMsgIds: Set<string>
+  /** Resolves once this wake has finished arming timers. Actions await it before using SQLite schedule. */
+  clocks: Promise<void>
+  settleClocks: (() => void) | null
+}
 
 /** One persisted room, keyed by its 4-character code. */
 export const gameRoom = actor({
@@ -40,7 +50,6 @@ export const gameRoom = actor({
   },
   /**
    * Once, when the actor is first created. Returns the saved room.
-   * `onCreate` runs after this.
    */
   createState: (c, input: GameRoomInput): GameRoomState => {
     // validate user nickname
@@ -74,33 +83,31 @@ export const gameRoom = actor({
       lastSeenAt: Date.now(),
     }
   },
+  /** In-memory only. Lost on sleep. Holds in-flight guesses and the timer gate for this wake. */
+  createVars: (): RoomVars => ({
+    pendingMsgIds: new Set<string>(),
+    clocks: Promise.resolve(),
+    settleClocks: null,
+  }),
   /**
    * Every new socket. Saves `{ playerId, intent }` on that connection, not on the room.
-   * `onCreate` runs once for the room. This runs again for each browser.
    */
-  /** In-memory only. Holds a msgId while a guess or next is waiting on the round timer. */
-  createVars: () => ({ pendingMsgIds: new Set<string>() }),
   createConnState: (_c, params: ConnParams): ConnParams => {
     const parsed = readParams(params)
     if (!parsed) throw new UserError('Join a room first')
     return parsed
   },
   /**
-   * Once, after `createState`. No socket yet. Starts the 6-hour idle timer.
-   * A later restart runs `onWake` instead of this.
-   * The id is written after `schedule.after` resolves. Writing it first queues a
-   * state save that runs on the next turn, overlapping the SQLite schedule call.
+   * Every time the actor starts, including the first create, sleep, or a process restart.
+   * Catches a finished round, and marks everyone away if no socket is open.
+   * A room left in `starting` is put back in the lobby so a timed-out song load can be retried.
+   *
+   * Does not await `c.schedule`. Rivet marks the actor started before this hook and then
+   * gives the browser socket 5 seconds (`onConnectTimeout`). The socket stays queued until
+   * this hook returns, so a SQLite schedule here becomes "actor websocket connection setup
+   * timed out". `run` arms the timers after the socket is free to connect.
    */
-  onCreate: async (c) => {
-    c.state.reapScheduleId = await c.schedule.after(REAP_MS, '_reap')
-  },
-  /**
-   * Every time the actor starts, including after sleep or a process restart.
-   * `onCreate` does not run again. Catches a finished round, and marks everyone away if no socket is open.
-   * Schedule calls finish before any state write. A room left in `starting` is put back in the lobby
-   * so a timed-out song load can be retried after the actor wakes.
-   */
-  onWake: async (c) => {
+  onWake: (c) => {
     let room = currentRoom(c.state.room)
     let recentMsgIds: GameRoomState['recentMsgIds'] | null = null
     if (room.starting) {
@@ -116,13 +123,48 @@ export const gameRoom = actor({
       }
     }
     room = syncPhase(room, Date.now())
-    const roundScheduleId = await scheduleFor(c, room)
-    const reapScheduleId = await replaceReap(c, REAP_MS)
     c.state.room = room
-    c.state.roundScheduleId = roundScheduleId
-    c.state.reapScheduleId = reapScheduleId
     if (recentMsgIds) c.state.recentMsgIds = recentMsgIds
     if (typeof c.state.lastSeenAt !== 'number') c.state.lastSeenAt = Date.now()
+    const previous = c.vars.settleClocks
+    let settle: () => void = () => {}
+    c.vars.clocks = new Promise<void>((resolve) => {
+      settle = resolve
+    })
+    c.vars.settleClocks = settle
+    previous?.()
+  },
+  /**
+   * After startup. Arms the round timer and the idle timer once the state save from
+   * `onWake` has finished, so those SQLite calls do not overlap that save and do not
+   * hold the browser socket.
+   *
+   * Each attempt gives up after `CLOCK_MS`. A thrown attempt is retried. The gate
+   * opens only after one attempt has armed both timers. A stuck SQLite call is waited
+   * out before the next attempt, so a retry does not stack a second transaction.
+   */
+  run: async (c) => {
+    const settle = c.vars.settleClocks
+    let delay = 250
+    while (!c.aborted) {
+      const { attempt, bounded } = armClocks(c)
+      try {
+        await bounded
+        settle?.()
+        return
+      } catch (error) {
+        console.error('failed to arm room timers', error)
+        const outcome = await waitForArm(attempt, c.abortSignal)
+        if (outcome === 'aborted') return
+        if (outcome === 'armed') {
+          settle?.()
+          return
+        }
+      }
+      if (c.aborted) return
+      await sleep(delay, c.abortSignal)
+      delay = Math.min(delay * 2, CLOCK_MS)
+    }
   },
   /**
    * Before the socket is accepted. Resume is refused when that player has no seat.
@@ -234,6 +276,7 @@ export const gameRoom = actor({
      * Forgets `msgId` if loading fails so the same command can be retried.
      */
     start: async (c, msgId: string, avoidTrackIds: number[]) => {
+      if (!(await readyClocks(c))) return
       const playerId = seated(c)
       if (!playerId) return
 
@@ -305,6 +348,7 @@ export const gameRoom = actor({
      * Records one guess. A repeated `msgId` re-sends the current view and does not score again.
      */
     guess: async (c, msgId: string, text: string) => {
+      if (!(await readyClocks(c))) return
       const playerId = seated(c)
       if (!playerId) return
       if (duplicate(c, playerId, msgId) || !claim(c, playerId, msgId)) {
@@ -336,6 +380,7 @@ export const gameRoom = actor({
      * Advances to the next round when `roundNumber` is the one on screen, then reschedules the deadline.
      */
     next: async (c, msgId: string, roundNumber: number) => {
+      if (!(await readyClocks(c))) return
       const playerId = seated(c)
       if (!playerId) return
       if (duplicate(c, playerId, msgId) || !claim(c, playerId, msgId)) {
@@ -545,6 +590,122 @@ async function cancelSchedule(c: ClockCtx, id: string | null): Promise<void> {
   } catch {
     // The timer already fired.
   }
+}
+
+/**
+ * Persists the wake, then arms the round timer and the idle timer.
+ * `saveState` finishes before either schedule call so the two SQLite users do not overlap.
+ * `bounded` rejects after `CLOCK_MS`. `attempt` is the same work, so the caller can wait
+ * for a timed-out save to finish before starting another one.
+ */
+function armClocks(c: ClockCtx & { saveState: (opts?: { immediate?: boolean }) => Promise<void> }): {
+  attempt: Promise<void>
+  bounded: Promise<void>
+} {
+  const attempt = writeClocks(c)
+  return { attempt, bounded: withDeadline(attempt, CLOCK_MS) }
+}
+
+async function writeClocks(c: ClockCtx & { saveState: (opts?: { immediate?: boolean }) => Promise<void> }): Promise<void> {
+  await c.saveState({ immediate: true })
+  const room = currentRoom(c.state.room)
+  const roundScheduleId = await scheduleFor(c, room)
+  const reapScheduleId = await replaceReap(c, REAP_MS)
+  c.state.roundScheduleId = roundScheduleId
+  c.state.reapScheduleId = reapScheduleId
+}
+
+/** Waits until a timed-out arm finishes, or until the actor is stopping. */
+async function waitForArm(attempt: Promise<void>, signal: AbortSignal): Promise<'armed' | 'failed' | 'aborted'> {
+  const stop = whenAborted(signal)
+  const outcome = await Promise.race([
+    attempt.then(
+      () => 'armed' as const,
+      () => 'failed' as const,
+    ),
+    stop.promise.then(() => 'aborted' as const),
+  ])
+  stop.cancel()
+  if (outcome === 'aborted') void attempt.catch(() => {})
+  return outcome
+}
+
+/**
+ * Waits until this wake's timers are armed so a later schedule does not overlap that SQLite work.
+ * Returns false and tells this player to retry when arming is still unfinished after `CLOCK_MS`.
+ * That is shorter than the action timeout, so a stuck arm does not hold the action for 120 seconds.
+ */
+async function readyClocks(c: ActionCtx & { vars: RoomVars }): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(CLOCKS_NOT_READY)), CLOCK_MS)
+  })
+  try {
+    await Promise.race([c.vars.clocks, timeout])
+    return true
+  } catch {
+    fail(c, CLOCKS_NOT_READY)
+    return false
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+/** Rejects when `work` is still pending after `ms`. A result that arrives later does not settle this promise again. */
+function withDeadline(work: Promise<void>, ms: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new Error(`arming room timers timed out after ${ms}ms`))
+    }, ms)
+    work.then(
+      () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve()
+      },
+      (error: unknown) => {
+        if (settled) {
+          console.error('failed to arm room timers', error)
+          return
+        }
+        settled = true
+        clearTimeout(timer)
+        reject(error instanceof Error ? error : new Error('failed to arm room timers'))
+      },
+    )
+  })
+}
+
+function whenAborted(signal: AbortSignal): { promise: Promise<void>; cancel: () => void } {
+  if (signal.aborted) return { promise: Promise.resolve(), cancel: () => {} }
+  let onAbort: () => void = () => {}
+  const promise = new Promise<void>((resolve) => {
+    onAbort = () => resolve()
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+  return {
+    promise,
+    cancel: () => signal.removeEventListener('abort', onAbort),
+  }
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve()
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 /**

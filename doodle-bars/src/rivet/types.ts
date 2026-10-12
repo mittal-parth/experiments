@@ -94,6 +94,7 @@ export type RoomClient = {
         ready: Promise<void>
         dispose: () => Promise<void>
         on: (name: string, cb: (...args: any[]) => void) => void
+        join: (nickname: string) => Promise<unknown>
         start: (msgId: string, avoidTrackIds: number[]) => Promise<unknown>
         guess: (msgId: string, text: string) => Promise<unknown>
         next: (msgId: string, roundNumber: number) => Promise<unknown>
