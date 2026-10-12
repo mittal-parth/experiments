@@ -58,7 +58,7 @@ iTunes lookups also happen inside the actor, on your machine, during `start`. Th
 | Everyone disconnected for 6 hours | `_reap` destroys it. |
 | Someone connects again | The 6-hour timer is reset. |
 
-The round timer is `c.schedule.after` on the actor. It still fires when no browser is connected. `onWake` reveals a round that ended while the process was down. `run` arms the timers after that, because Rivet accepts the browser socket as soon as the actor is marked started and only waits 5 seconds for the socket to finish opening.
+The round timer is `c.schedule.after` on the actor. It still fires when no browser is connected. `onWake` reveals a round that ended while the process was down. `run` arms the timers after that, because Rivet accepts the browser socket as soon as the actor is marked started and only waits 5 seconds for the socket to finish opening. A failed arm is retried. Start, guess, and next stop waiting after 5 seconds, which is inside the 120-second action timeout.
 
 ## Where the code lives
 
