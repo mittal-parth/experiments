@@ -128,6 +128,31 @@ describe('loadRoundSongs', () => {
     expect(songs.map((song) => song.title)).toEqual(hindi.songs.slice(0, 5).map((song) => song.title))
   })
 
+  it('does not let a hung lookup block the next one', async () => {
+    vi.useFakeTimers()
+    try {
+      const hung = loadRoundSongs(hindi, {
+        mode: 'live',
+        order: 'catalog',
+        fetchImpl: (() => new Promise(() => {})) as unknown as typeof fetch,
+      }, 1)
+      const failed = expect(hung).rejects.toThrow(/timed out/)
+      await vi.advanceTimersByTimeAsync(35_000)
+      await failed
+
+      const fetchImpl = vi.fn(async (url: string) => lookupResponse(hindi.songs, (id) => url.includes(String(id))))
+      const songs = await loadRoundSongs(hindi, {
+        mode: 'live',
+        order: 'catalog',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }, 1)
+      expect(songs[0]?.title).toBe('Kesariya')
+      expect(fetchImpl).toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps an https cover and drops anything that is not one', () => {
     expect(largerArtwork('https://is1-ssl.mzstatic.com/image/thumb/a/100x100bb.jpg')).toBe(
       'https://is1-ssl.mzstatic.com/image/thumb/a/600x600bb.jpg',

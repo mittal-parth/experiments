@@ -71,12 +71,15 @@ export const gameRoom = actor({
       recentMsgIds: {},
       reapScheduleId: null,
       roundScheduleId: null,
+      lastSeenAt: Date.now(),
     }
   },
   /**
    * Every new socket. Saves `{ playerId, intent }` on that connection, not on the room.
    * `onCreate` runs once for the room. This runs again for each browser.
    */
+  /** In-memory only. Holds a msgId while a guess or next is waiting on the round timer. */
+  createVars: () => ({ pendingMsgIds: new Set<string>() }),
   createConnState: (_c, params: ConnParams): ConnParams => {
     const parsed = readParams(params)
     if (!parsed) throw new UserError('Join a room first')
@@ -85,18 +88,27 @@ export const gameRoom = actor({
   /**
    * Once, after `createState`. No socket yet. Starts the 6-hour idle timer.
    * A later restart runs `onWake` instead of this.
-   * This cannot be done as part of createState as createState returns an object which is
-   * not yet saved. onCreate needs the object to write the time.
+   * The id is written after `schedule.after` resolves. Writing it first queues a
+   * state save that runs on the next turn, overlapping the SQLite schedule call.
    */
   onCreate: async (c) => {
-    await armReap(c)
+    c.state.reapScheduleId = await c.schedule.after(REAP_MS, '_reap')
   },
   /**
    * Every time the actor starts, including after sleep or a process restart.
    * `onCreate` does not run again. Catches a finished round, and marks everyone away if no socket is open.
+   * Schedule calls finish before any state write. A room left in `starting` is put back in the lobby
+   * so a timed-out song load can be retried after the actor wakes.
    */
   onWake: async (c) => {
     let room = currentRoom(c.state.room)
+    let recentMsgIds: GameRoomState['recentMsgIds'] | null = null
+    if (room.starting) {
+      room = abortStarting(room)
+      const ids = { ...c.state.recentMsgIds }
+      delete ids[room.hostId]
+      recentMsgIds = ids
+    }
     if (c.conns.size === 0) {
       for (const player of room.players) {
         if (!player.connected) continue
@@ -104,11 +116,13 @@ export const gameRoom = actor({
       }
     }
     room = syncPhase(room, Date.now())
+    const roundScheduleId = await scheduleFor(c, room)
+    const reapScheduleId = await replaceReap(c, REAP_MS)
     c.state.room = room
-    if (room.phase === 'playing' && room.roundEndsAt !== null) {
-      await scheduleRound(c, room.roundIndex, room.roundEndsAt)
-    }
-    if (!c.state.reapScheduleId) await armReap(c)
+    c.state.roundScheduleId = roundScheduleId
+    c.state.reapScheduleId = reapScheduleId
+    if (recentMsgIds) c.state.recentMsgIds = recentMsgIds
+    if (typeof c.state.lastSeenAt !== 'number') c.state.lastSeenAt = Date.now()
   },
   /**
    * Before the socket is accepted. Resume is refused when that player has no seat.
@@ -122,15 +136,16 @@ export const gameRoom = actor({
     }
   },
   /**
-   * Socket is up. Marks a seated player present, resets the idle timer, and sends each screen.
+   * Socket is up. Marks a seated player present and sends each screen.
+   * Does not touch `c.schedule`. Cancelling the idle timer here awaited SQLite on every reconnect.
    */
-  onConnect: async (c, conn) => {
+  onConnect: (c, conn) => {
     const playerId = conn.state.playerId
     const room = currentRoom(c.state.room)
+    c.state.lastSeenAt = Date.now()
     if (room.players.some((player) => player.id === playerId)) {
       c.state.room = setConnected(room, playerId, true, Date.now())
     }
-    await armReap(c)
     pushViews(c)
   },
   /**
@@ -143,6 +158,7 @@ export const gameRoom = actor({
       (other) => other.id !== conn.id && other.state.playerId === playerId,
     )
     if (stillThere) return
+    c.state.lastSeenAt = Date.now()
     const room = currentRoom(c.state.room)
     if (!room.players.some((player) => player.id === playerId)) return
     c.state.room = setConnected(room, playerId, false, Date.now())
@@ -268,8 +284,12 @@ export const gameRoom = actor({
           return
         }
 
+        // The "starting" write above queued a save. Let it finish before the round timer
+        // takes SQLite, then store the room and the new timer id together.
+        await c.saveState({ immediate: true })
+        const roundScheduleId = await scheduleFor(c, begun.room)
         c.state.room = begun.room
-        await scheduleRound(c, begun.room.roundIndex, begun.room.roundEndsAt ?? Date.now())
+        c.state.roundScheduleId = roundScheduleId
         pushViews(c)
       } catch (error) {
         const pending = currentRoom(c.state.room)
@@ -287,23 +307,30 @@ export const gameRoom = actor({
     guess: async (c, msgId: string, text: string) => {
       const playerId = seated(c)
       if (!playerId) return
-      if (duplicate(c, playerId, msgId)) {
+      if (duplicate(c, playerId, msgId) || !claim(c, playerId, msgId)) {
         pushOne(c)
         return
       }
-      
-      const guessed = submitGuess(currentRoom(c.state.room), playerId, text, Date.now())
-      if (guessed.room) c.state.room = guessed.room
-      if (!guessed.ok) {
-        await syncClock(c)
+      try {
+        const guessed = submitGuess(currentRoom(c.state.room), playerId, text, Date.now())
+        if (!guessed.ok) {
+          if (guessed.room) {
+            const roundScheduleId = await scheduleFor(c, guessed.room)
+            c.state.room = guessed.room
+            c.state.roundScheduleId = roundScheduleId
+          }
+          pushViews(c)
+          fail(c, guessed.error)
+          return
+        }
+        const roundScheduleId = await scheduleFor(c, guessed.room)
+        remember(c, playerId, msgId)
+        c.state.room = guessed.room
+        c.state.roundScheduleId = roundScheduleId
         pushViews(c)
-        fail(c, guessed.error)
-        return
+      } finally {
+        release(c, playerId, msgId)
       }
-      remember(c, playerId, msgId)
-      c.state.room = guessed.room
-      await syncClock(c)
-      pushViews(c)
     },
     /**
      * Advances to the next round when `roundNumber` is the one on screen, then reschedules the deadline.
@@ -311,19 +338,24 @@ export const gameRoom = actor({
     next: async (c, msgId: string, roundNumber: number) => {
       const playerId = seated(c)
       if (!playerId) return
-      if (duplicate(c, playerId, msgId)) {
+      if (duplicate(c, playerId, msgId) || !claim(c, playerId, msgId)) {
         pushOne(c)
         return
       }
-      const stepped = advance(currentRoom(c.state.room), playerId, Date.now(), guessGraceSeconds(), roundNumber)
-      if (!stepped.ok) {
-        fail(c, stepped.error)
-        return
+      try {
+        const stepped = advance(currentRoom(c.state.room), playerId, Date.now(), guessGraceSeconds(), roundNumber)
+        if (!stepped.ok) {
+          fail(c, stepped.error)
+          return
+        }
+        const roundScheduleId = await scheduleFor(c, stepped.room)
+        remember(c, playerId, msgId)
+        c.state.room = stepped.room
+        c.state.roundScheduleId = roundScheduleId
+        pushViews(c)
+      } finally {
+        release(c, playerId, msgId)
       }
-      remember(c, playerId, msgId)
-      c.state.room = stepped.room
-      await syncClock(c)
-      pushViews(c)
     },
     /**
      * Host returns a finished game to the lobby. Songs and scores from the last game are cleared by `restart`.
@@ -371,25 +403,28 @@ export const gameRoom = actor({
       if (room.phase !== 'playing' || room.roundIndex !== roundIndex) return
       const endsAt = room.roundEndsAt
       if (endsAt === null) return
-      if (Date.now() < endsAt) {
-        await scheduleRound(c, roundIndex, endsAt)
-        return
+      const revealed = Date.now() < endsAt ? room : syncPhase(room, Date.now())
+      const roundScheduleId = await scheduleFor(c, revealed)
+      c.state.roundScheduleId = roundScheduleId
+      if (revealed !== room) {
+        c.state.room = revealed
+        pushViews(c)
       }
-      c.state.roundScheduleId = null
-      c.state.room = syncPhase(room, Date.now())
-      pushViews(c)
     },
     /**
-     * Rivet calls this 6 hours after the last connect.
-     * Destroys the actor only if everyone is still away. Otherwise arms the timer again.
+     * Rivet calls this when the idle timer fires.
+     * A live socket, or a disconnect newer than 6 hours, arms it again. Otherwise the room is destroyed.
+     * Connecting does not cancel this timer. That awaited SQLite on every reconnect.
      */
     _reap: async (c) => {
       const awake = c.conns.size > 0 || c.state.room.players.some((player) => player.connected)
-      if (awake) {
-        await armReap(c)
+      const idleFor = Date.now() - idleSince(c.state)
+      if (!awake && idleFor >= REAP_MS) {
+        c.destroy()
         return
       }
-      c.destroy()
+      const delay = awake ? REAP_MS : Math.max(0, REAP_MS - idleFor)
+      c.state.reapScheduleId = await replaceReap(c, delay)
     },
   },
 })
@@ -416,6 +451,24 @@ function seated(c: ActionCtx): string | null {
     return null
   }
   return playerId
+}
+
+function msgKey(playerId: string, msgId: string): string {
+  return `${playerId}\0${msgId}`
+}
+
+/** Reserves `msgId` for the await below. False when this call is already in flight. An empty id is not reserved. */
+function claim(c: { vars: { pendingMsgIds: Set<string> } }, playerId: string, msgId: string): boolean {
+  if (!msgId) return true
+  const key = msgKey(playerId, msgId)
+  if (c.vars.pendingMsgIds.has(key)) return false
+  c.vars.pendingMsgIds.add(key)
+  return true
+}
+
+function release(c: { vars: { pendingMsgIds: Set<string> } }, playerId: string, msgId: string): void {
+  if (!msgId) return
+  c.vars.pendingMsgIds.delete(msgKey(playerId, msgId))
 }
 
 /** True when this player already applied `msgId`. An empty id is never treated as a repeat. */
@@ -479,45 +532,37 @@ function fail(c: ActionCtx, message: string): void {
   c.conn.send('error', { message })
 }
 
-/** Cancels the previous idle timer and schedules `_reap` for 6 hours from now. */
-async function armReap(c: ClockCtx): Promise<void> {
-  const previous = c.state.reapScheduleId
-  c.state.reapScheduleId = null
-  if (previous) {
-    try {
-      await c.schedule.cancel(previous)
-    } catch {
-      // The previous reap already fired.
-    }
-  }
-  c.state.reapScheduleId = await c.schedule.after(REAP_MS, '_reap')
+/** Milliseconds since the last socket. Rooms saved before `lastSeenAt` existed count as just seen. */
+function idleSince(state: GameRoomState): number {
+  return typeof state.lastSeenAt === 'number' ? state.lastSeenAt : Date.now()
 }
 
-/** Cancels the scheduled round deadline, if one is still armed. */
-async function cancelRound(c: ClockCtx): Promise<void> {
-  const previous = c.state.roundScheduleId
-  if (!previous) return
-  c.state.roundScheduleId = null
+/** Cancels one schedule id. A timer that already fired rejects; that is not a failure. */
+async function cancelSchedule(c: ClockCtx, id: string | null): Promise<void> {
+  if (!id) return
   try {
-    await c.schedule.cancel(previous)
+    await c.schedule.cancel(id)
   } catch {
-    // The round timer already fired.
+    // The timer already fired.
   }
 }
 
-/** Schedules `_onRoundDue` for this round index at `endsAt`. Replaces any earlier deadline. */
-async function scheduleRound(c: ClockCtx, roundIndex: number, endsAt: number): Promise<void> {
-  await cancelRound(c)
-  const delay = Math.max(0, endsAt - Date.now())
-  c.state.roundScheduleId = await c.schedule.after(delay, '_onRoundDue', roundIndex)
+/**
+ * Cancels the stored idle timer and returns the id of the new one.
+ * The caller writes that id. Nothing is written before the awaits.
+ */
+async function replaceReap(c: ClockCtx, delay: number): Promise<string> {
+  await cancelSchedule(c, c.state.reapScheduleId)
+  return c.schedule.after(delay, '_reap')
 }
 
-/** Reschedules the round deadline while a round is open. Cancels it once the round is no longer playing. */
-async function syncClock(c: ClockCtx): Promise<void> {
-  const room = currentRoom(c.state.room)
-  if (room.phase === 'playing' && room.roundEndsAt !== null) {
-    await scheduleRound(c, room.roundIndex, room.roundEndsAt)
-    return
-  }
-  await cancelRound(c)
+/**
+ * Returns the round-timer id to store, or null when the round is not open.
+ * Does not write state. Callers assign `c.state` after this resolves, with no await in between.
+ */
+async function scheduleFor(c: ClockCtx, room: Room): Promise<string | null> {
+  await cancelSchedule(c, c.state.roundScheduleId)
+  if (room.phase !== 'playing' || room.roundEndsAt === null) return null
+  const delay = Math.max(0, room.roundEndsAt - Date.now())
+  return c.schedule.after(delay, '_onRoundDue', room.roundIndex)
 }

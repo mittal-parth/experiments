@@ -26,6 +26,13 @@ const LOOKUP_LIMIT = 40
 const LOOKUP_SPARE = 8
 const HIT_TTL_MS = 6 * 60 * 60 * 1000
 const RETRY_DELAYS_MS = [200, 600]
+/** One lookup attempt. A drip of bytes resets the socket idle timer, so this is absolute. */
+const LOOKUP_SOCKET_MS = 10_000
+/**
+ * Backstop for the process-wide lookup queue. A promise that never settles used to pin
+ * every later `start` until the runner was restarted.
+ */
+const LOOKUP_DEADLINE_MS = 35_000
 
 type CachedPreview = {
   previewUrl: string
@@ -39,6 +46,7 @@ let lookupChain: Promise<unknown> = Promise.resolve()
 
 export function clearPreviewCache(): void {
   previewCache.clear()
+  lookupChain = Promise.resolve()
 }
 
 export function largerArtwork(raw: unknown): string | null {
@@ -129,12 +137,33 @@ function readCache(storefront: string, trackId: number, now: number): CachedPrev
 }
 
 function scheduleLookup<T>(task: () => Promise<T>): Promise<T> {
-  const run = lookupChain.then(task, task)
+  const run = lookupChain.then(
+    () => withDeadline(task(), LOOKUP_DEADLINE_MS),
+    () => withDeadline(task(), LOOKUP_DEADLINE_MS),
+  )
   lookupChain = run.then(
     () => undefined,
     () => undefined,
   )
   return run
+}
+
+function withDeadline<T>(task: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error('iTunes lookup timed out'))
+    }, ms)
+    task.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timer)
+        reject(error instanceof Error ? error : new Error('iTunes lookup failed'))
+      },
+    )
+  })
 }
 
 async function lookupTracks(
@@ -252,8 +281,13 @@ function readHttpsJson(url: string): Promise<{ results?: LookupTrack[] }> {
         }
       })
     })
-    req.setTimeout(10_000, () => {
+    const kill = () => {
       req.destroy(new Error('iTunes lookup timed out'))
+    }
+    const deadline = setTimeout(kill, LOOKUP_SOCKET_MS)
+    req.setTimeout(LOOKUP_SOCKET_MS, kill)
+    req.on('close', () => {
+      clearTimeout(deadline)
     })
     req.on('error', reject)
     req.end()

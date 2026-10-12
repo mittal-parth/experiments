@@ -22,6 +22,8 @@ export type GameRoomState = {
   recentMsgIds: Record<string, string[]>
   reapScheduleId: string | null
   roundScheduleId: string | null
+  /** When the room last had a socket. Idle reaping is measured from this. */
+  lastSeenAt: number
 }
 
 export type SnapshotEvent = { playerId: string; view: RoomView }
