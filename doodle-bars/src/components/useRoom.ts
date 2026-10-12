@@ -1,5 +1,6 @@
 'use client'
 
+import { onRoomLeave, onRoomViewChange, reportClientError, reportSessionHeartbeat } from '@/analytics/room-analytics'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { makeCode, makeId } from '@/game/ids'
 import { cleanCode } from '@/game/names'
@@ -125,6 +126,8 @@ async function runReplay(conn: SongConn, command: Replay): Promise<void> {
 
 export function useRoom() {
   const [view, setView] = useState<RoomView | null>(null)
+  const viewRef = useRef<RoomView | null>(null)
+  viewRef.current = view
   const [error, setError] = useState<string | null>(null)
   const [connected, setConnected] = useState(true)
   const [waiting, setWaiting] = useState(false)
@@ -151,12 +154,15 @@ export function useRoom() {
     waitTimer.current = setTimeout(() => {
       waitTimer.current = null
       setWaiting(false)
+      reportClientError(REPLY_TIMEOUT_ERROR, 'reply_timeout')
       setError(REPLY_TIMEOUT_ERROR)
     }, REPLY_TIMEOUT_MS)
   }, [])
 
   const dropSession = useCallback(
     (message: string) => {
+      onRoomViewChange(null)
+      reportClientError(message, 'session_dropped')
       sessionRef.current = null
       forgetSession()
       acceptRef.current = false
@@ -178,6 +184,7 @@ export function useRoom() {
       syncRoomUrl(payload.view.code, payload.view.mode)
       clearWait()
       setView(payload.view)
+      onRoomViewChange(payload.view)
       setError((current) => (current !== null && STALE_ERRORS.has(current) ? null : current))
     },
     [clearWait],
@@ -223,11 +230,13 @@ export function useRoom() {
         dropSession(payload.message)
         return
       }
+      reportClientError(payload.message, 'rivet_error')
       clearWait()
       setError(payload.message)
     })
     conn.on('left', () => {
       if (connRef.current !== conn) return
+      onRoomViewChange(null)
       sessionRef.current = null
       forgetSession()
       clearWait()
@@ -263,8 +272,10 @@ export function useRoom() {
         dropSession(explained)
         return
       }
+      const message = errorText(caught) || 'No response from the server. Try again.'
+      reportClientError(message, 'connect_ready')
       clearWait()
-      setError(errorText(caught) || 'No response from the server. Try again.')
+      setError(message)
     }
   }, [applySnapshot, clearWait, dropSession])
 
@@ -280,6 +291,15 @@ export function useRoom() {
   const reconnectRef = useRef(reconnectNow)
   openConnRef.current = openConn
   reconnectRef.current = reconnectNow
+
+  useEffect(() => {
+    if (!view) return
+    const id = setInterval(() => {
+      const current = viewRef.current
+      if (current) reportSessionHeartbeat(current)
+    }, 60_000)
+    return () => clearInterval(id)
+  }, [view?.code])
 
   useEffect(() => {
     const client = createSongClient()
@@ -317,6 +337,7 @@ export function useRoom() {
       const client = clientRef.current
       if (!client) {
         clearWait()
+        reportClientError(REPLY_TIMEOUT_ERROR, 'create_room_no_client')
         setError(REPLY_TIMEOUT_ERROR)
         return
       }
@@ -349,6 +370,7 @@ export function useRoom() {
         }
       }
       clearWait()
+      reportClientError(lastError, 'create_room')
       setError(lastError)
     },
     [clearWait, openConn],
@@ -359,6 +381,7 @@ export function useRoom() {
       const code = cleanCode(message.code)
       if (!code) {
         clearWait()
+        reportClientError('That room code is not valid', 'join_room')
         setError('That room code is not valid')
         return
       }
@@ -423,6 +446,7 @@ export function useRoom() {
   )
 
   const leave = useCallback(() => {
+    onRoomLeave(viewRef.current)
     acceptRef.current = false
     const conn = connRef.current
     connRef.current = null

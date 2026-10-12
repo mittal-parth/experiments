@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { captureGameEvent } from '@/analytics/posthog-client'
 import {
   DrawablyCard,
   DrawablyCircle,
@@ -159,6 +160,13 @@ function Home({
     const nick = nickOrWarn()
     if (!nick) return
     unlockAudio()
+    captureGameEvent('game_created', {
+      game_mode: mode,
+      playlist_id: playlistId,
+      clip_seconds: clipSeconds,
+      round_count: roundCount,
+      answer_mode: answer,
+    })
     send({ type: 'create', nickname: nick, playlistId, clipSeconds, roundCount, mode, answer })
   }
 
@@ -172,6 +180,7 @@ function Home({
       return
     }
     unlockAudio()
+    captureGameEvent('room_join_requested')
     send({ type: 'join', nickname: nick, code: roomCode })
   }
 
@@ -358,6 +367,13 @@ function Lobby({
             disabled={view.starting}
             onClick={() => {
               unlockAudio()
+              captureGameEvent('game_started', {
+                game_mode: view.mode,
+                playlist_id: view.playlistId,
+                clip_seconds: view.clipSeconds,
+                round_count: view.roundCount,
+                answer_mode: view.answer,
+              })
               send({
                 type: 'start',
                 avoidTrackIds: heardIds(localStorage.getItem(HEARD_STORAGE_KEY), view.playlistId),
@@ -369,7 +385,14 @@ function Lobby({
         ) : (
           <p className="quiet">Waiting for the host.</p>
         )}
-        <AppButton type="button" data-testid="leave" onClick={leave}>
+        <AppButton
+          type="button"
+          data-testid="leave"
+          onClick={() => {
+            captureGameEvent('game_left', { game_mode: view.mode, game_phase: 'lobby' })
+            leave()
+          }}
+        >
           Leave
         </AppButton>
       </div>
@@ -410,6 +433,12 @@ function Playing({
     if (!text || youSolved || waiting) return
     sentGuess.current = text
     setGuess('')
+    captureGameEvent('guess_submitted', {
+      game_mode: view.mode,
+      playlist_id: view.playlistId,
+      answer_mode: view.answer,
+      round_number: view.roundNumber,
+    })
     send({ type: 'guess', text })
   }
 
@@ -534,6 +563,11 @@ function Reveal({
           onClick={() => {
             if (waiting) return
             unlockAudio()
+            captureGameEvent('round_advanced', {
+              game_mode: view.mode,
+              round_number: view.roundNumber,
+              is_final_round: finishing,
+            })
             send({ type: 'next', roundNumber: view.roundNumber })
           }}
         >
@@ -602,6 +636,7 @@ function Done({
             disabled={waiting}
             onClick={() => {
               if (waiting) return
+              captureGameEvent('game_restarted', { game_mode: view.mode, round_count: view.totalRounds })
               send({ type: 'restart' })
             }}
           >
@@ -610,7 +645,14 @@ function Done({
         ) : (
           <p className="quiet">Waiting for the host.</p>
         )}
-        <AppButton type="button" data-testid="leave" onClick={leave}>
+        <AppButton
+          type="button"
+          data-testid="leave"
+          onClick={() => {
+            captureGameEvent('game_left', { game_mode: view.mode, game_phase: 'done' })
+            leave()
+          }}
+        >
           Leave
         </AppButton>
       </div>
