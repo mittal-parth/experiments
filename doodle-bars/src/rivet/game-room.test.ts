@@ -123,6 +123,45 @@ it('reveals when the round timer fires with no client call', async (c) => {
   await room.conn.dispose()
 })
 
+it('reveals each round from its own timer', async (c) => {
+  process.env.GUESS_GRACE_SECONDS = '1'
+  const { client } = await setupTest(c, registry)
+  const room = await host(client, { roundCount: 2, clipSeconds: 1 })
+  await room.conn.start(makeId(), [])
+  await waitPhase(room.snapshots, 'playing')
+  const first = await waitPhase(room.snapshots, 'reveal', 8_000)
+  expect(first.view.roundNumber).toBe(1)
+  await room.conn.next(makeId(), first.view.roundNumber)
+  await expect.poll(() => room.snapshots.at(-1)?.view.roundNumber).toBe(2)
+  const second = await waitPhase(room.snapshots, 'reveal', 8_000)
+  expect(second.view.roundNumber).toBe(2)
+  expect(room.errors).toEqual([])
+  await room.conn.dispose()
+}, 30_000)
+
+it('ignores a round timer left over from the previous game', async (c) => {
+  process.env.GUESS_GRACE_SECONDS = '1'
+  const { client } = await setupTest(c, registry)
+  const room = await host(client, { roundCount: 1, clipSeconds: 1 })
+  await room.conn.start(makeId(), [])
+  await waitPhase(room.snapshots, 'playing')
+  await room.conn.guess(makeId(), 'Kesariya')
+  const revealed = await waitPhase(room.snapshots, 'reveal')
+  await room.conn.next(makeId(), revealed.view.roundNumber)
+  await waitPhase(room.snapshots, 'done')
+  await room.conn.restart(makeId())
+  await waitPhase(room.snapshots, 'lobby')
+
+  // The first game's round 1 timer is still pending. The new round 1 runs much longer.
+  process.env.GUESS_GRACE_SECONDS = '45'
+  await room.conn.start(makeId(), [])
+  await waitPhase(room.snapshots, 'playing')
+  await new Promise((resolve) => setTimeout(resolve, 3_000))
+  expect(room.snapshots.at(-1)?.view.phase).toBe('playing')
+  expect(room.errors).toEqual([])
+  await room.conn.dispose()
+}, 30_000)
+
 it('keeps the room after the client disconnects', async (c) => {
   const { client } = await setupTest(c, registry)
   const room = await host(client)

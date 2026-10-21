@@ -26,6 +26,8 @@ export default defineConfig({
       SONG_PREVIEW_MODE: 'fixture',
       SONG_ORDER: 'catalog',
       GUESS_GRACE_SECONDS: '45',
+      NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: 'playwright',
+      NEXT_PUBLIC_POSTHOG_HOST: 'https://us.i.posthog.com',
     },
   },
 })

@@ -12,6 +12,8 @@ import type { GameRoomInput, SongClient, SongConn } from '@/rivet/types'
 const SESSION_KEY = 'song-guesser-session'
 const REPLY_TIMEOUT_MS = 8_000
 const REPLY_TIMEOUT_ERROR = 'No response from the server. Try again.'
+const RECONNECT_BACKOFF_INITIAL_MS = 1_000
+const RECONNECT_BACKOFF_MAX_MS = 30_000
 const UNBOUND_ERROR = 'Join a room first'
 const STALE_ERRORS = new Set([REPLY_TIMEOUT_ERROR, UNBOUND_ERROR])
 
@@ -141,6 +143,8 @@ export function useRoom() {
   const acceptRef = useRef(true)
   const opening = useRef<Promise<void> | null>(null)
   const waitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectBackoffMs = useRef(RECONNECT_BACKOFF_INITIAL_MS)
 
   const clearWait = useCallback(() => {
     if (waitTimer.current) clearTimeout(waitTimer.current)
@@ -156,6 +160,12 @@ export function useRoom() {
       setWaiting(false)
       reportClientError(REPLY_TIMEOUT_ERROR, 'reply_timeout')
       setError(REPLY_TIMEOUT_ERROR)
+      if (connRef.current?.connStatus !== 'connected') {
+        const stale = connRef.current
+        connRef.current = null
+        if (stale) void stale.dispose()
+        scheduleReconnectRef.current()
+      }
     }, REPLY_TIMEOUT_MS)
   }, [])
 
@@ -247,7 +257,12 @@ export function useRoom() {
       if (connRef.current !== conn) return
       setConnected(status === 'connected')
       if (status === 'disconnected') replayed.current = false
-          if (status === 'connected') {
+      if (status === 'connected') {
+        reconnectBackoffMs.current = RECONNECT_BACKOFF_INITIAL_MS
+        if (reconnectTimer.current) {
+          clearTimeout(reconnectTimer.current)
+          reconnectTimer.current = null
+        }
         const command = lastCommand.current
         if (command && !replayed.current) {
           replayed.current = true
@@ -289,8 +304,18 @@ export function useRoom() {
 
   const openConnRef = useRef(openConn)
   const reconnectRef = useRef(reconnectNow)
+  const scheduleReconnectRef = useRef(() => {})
   openConnRef.current = openConn
   reconnectRef.current = reconnectNow
+  scheduleReconnectRef.current = () => {
+    if (!sessionRef.current || !acceptRef.current || reconnectTimer.current || opening.current) return
+    const delay = reconnectBackoffMs.current
+    reconnectBackoffMs.current = Math.min(delay * 2, RECONNECT_BACKOFF_MAX_MS)
+    reconnectTimer.current = setTimeout(() => {
+      reconnectTimer.current = null
+      void openConnRef.current()
+    }, delay)
+  }
 
   useEffect(() => {
     if (!view) return
@@ -325,6 +350,7 @@ export function useRoom() {
       window.removeEventListener('online', onOnline)
       window.removeEventListener('pageshow', onOnline)
       if (waitTimer.current) clearTimeout(waitTimer.current)
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
       const conn = connRef.current
       connRef.current = null
       void conn?.dispose()
