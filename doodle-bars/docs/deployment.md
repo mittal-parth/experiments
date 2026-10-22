@@ -34,6 +34,10 @@ Set these on that service:
 
 Do not open a public port for the actor. The process connects outbound to Rivet. It also needs outbound HTTPS to iTunes. A default cloud firewall that allows outbound 443 is enough. Leave 6420 closed.
 
+Run at least two runner containers with the same env file (same `RIVET_ENDPOINT`, same `RIVET_RUNNER_VERSION`). Rivet Cloud routes new rooms to a healthy runner. If one container's outbound link to Rivet goes half-open, the other keeps serving players while Docker restarts the sick one.
+
+Each runner polls Rivet's built-in health every 2 seconds. After two consecutive non-200 responses (often `503` with `engine_ping_stale`), or if the runner never becomes healthy within 60 seconds of boot, it logs a line like `runner unhealthy: …; exiting so the runner can restart` and exits with code 1. With `--restart unless-stopped`, Docker starts a fresh container and a new websocket. Room state lives in Rivet, not in the container.
+
 ### Install Docker
 
 ```bash

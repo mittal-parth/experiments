@@ -58,7 +58,7 @@ iTunes lookups also happen inside the actor, on your machine, during `start`. Th
 | Everyone disconnected for 6 hours | `_reap` destroys it. |
 | Someone connects again | The 6-hour timer is reset. |
 
-The round timer is `c.schedule.after` on the actor. It still fires when no browser is connected. `onWake` reveals a round that ended while the process was down. `run` arms the timers after that, because Rivet accepts the browser socket as soon as the actor is marked started and only waits 5 seconds for the socket to finish opening. A failed arm is retried. Start, guess, and next stop waiting after 5 seconds, which is inside the 120-second action timeout.
+The idle reaper is scheduled once in `onCreate` and `_reap` re-arms itself. The round timer is scheduled once when a round starts (`start` or `next`): `c.schedule.after(delay, '_onRoundDue', roundIndex, roundEndsAt)`. Rivet keeps those schedules across sleep and restarts, so `onWake` does not touch SQLite. `_onRoundDue` ignores a fire when `endsAt` no longer matches, which covers leftover timers from an earlier game. The timer still fires when no browser is connected. `onWake` runs `syncPhase` so a round that ended while the process was down is revealed when the actor wakes. `onWake` is synchronous and must stay fast: the browser socket only waits about 5 seconds for the connect hook to finish.
 
 ## Where the code lives
 
@@ -70,7 +70,8 @@ The round timer is `c.schedule.after` on the actor. It still fires when no brows
 | `src/rivet/errors.ts` | "No room with that code", and the collision check used when two hosts mint the same code. |
 | `src/rivet/browser-client.ts` | `createClient` pointed at the public endpoint. |
 | `src/components/useRoom.ts` | The only browser caller. See [actions.md](actions.md). |
-| `runner.ts` | `registry.start()` for local dev and for the VM. |
+| `runner.ts` | `registry.start()` plus a health watchdog that exits when Rivet's link is stale. |
+| `src/server/runner-watchdog.ts` | Polls `registry.routes.health()` and event-loop lag; triggers process exit for Docker restart. |
 | `dev.ts` | Runner, then Next. |
 | `Dockerfile` | Node 22 Debian image that runs `runner.ts`. |
 | `src/game/room.ts` | Unchanged game rules. |

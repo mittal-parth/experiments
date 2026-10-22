@@ -20,8 +20,6 @@ export type ConnParams = {
 export type GameRoomState = {
   room: Room
   recentMsgIds: Record<string, string[]>
-  reapScheduleId: string | null
-  roundScheduleId: string | null
   /** When the room last had a socket. Idle reaping is measured from this. */
   lastSeenAt: number
 }
@@ -74,7 +72,6 @@ export type ClockCtx = {
   state: GameRoomState
   schedule: {
     after: (duration: number, action: string, ...args: unknown[]) => Promise<string>
-    cancel: (id: string) => Promise<boolean>
   }
 }
 
@@ -98,6 +95,7 @@ export type RoomClient = {
         start: (msgId: string, avoidTrackIds: number[]) => Promise<unknown>
         guess: (msgId: string, text: string) => Promise<unknown>
         next: (msgId: string, roundNumber: number) => Promise<unknown>
+        restart: (msgId: string) => Promise<unknown>
         leave: () => Promise<unknown>
       }
     }

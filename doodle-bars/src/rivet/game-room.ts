@@ -26,15 +26,10 @@ import type { ActionCtx, ClockCtx, ConnParams, GameRoomInput, GameRoomState, Roo
 const MSG_LIMIT = 32
 const REAP_MS = 6 * 60 * 60 * 1000
 const ACTION_TIMEOUT_MS = 120_000
-/** How long start, guess, and next wait for timers. Far inside the 120s action timeout. */
-const CLOCK_MS = 5_000
-const CLOCKS_NOT_READY = 'The room is still starting. Try again.'
+const NEXT_FAILED = 'Could not start the next round. Try again.'
 
 type RoomVars = {
   pendingMsgIds: Set<string>
-  /** Resolves once this wake has finished arming timers. Actions await it before using SQLite schedule. */
-  clocks: Promise<void>
-  settleClocks: (() => void) | null
 }
 
 /** One persisted room, keyed by its 4-character code. */
@@ -78,16 +73,19 @@ export const gameRoom = actor({
         answer: input.answer,
       }),
       recentMsgIds: {},
-      reapScheduleId: null,
-      roundScheduleId: null,
       lastSeenAt: Date.now(),
     }
   },
-  /** In-memory only. Lost on sleep. Holds in-flight guesses and the timer gate for this wake. */
+  /**
+   * Once, when the actor is first created and before any socket. Arms the idle timer.
+   * Rivet keeps schedules across sleep and restarts, so no later wake arms it again. `_reap` re-arms itself.
+   */
+  onCreate: async (c) => {
+    await c.schedule.after(REAP_MS, '_reap')
+  },
+  /** In-memory only. Lost on sleep. Holds in-flight `next` calls. */
   createVars: (): RoomVars => ({
     pendingMsgIds: new Set<string>(),
-    clocks: Promise.resolve(),
-    settleClocks: null,
   }),
   /**
    * Every new socket. Saves `{ playerId, intent }` on that connection, not on the room.
@@ -102,10 +100,8 @@ export const gameRoom = actor({
    * Catches a finished round, and marks everyone away if no socket is open.
    * A room left in `starting` is put back in the lobby so a timed-out song load can be retried.
    *
-   * Does not await `c.schedule`. Rivet marks the actor started before this hook and then
-   * gives the browser socket 5 seconds (`onConnectTimeout`). The socket stays queued until
-   * this hook returns, so a SQLite schedule here becomes "actor websocket connection setup
-   * timed out". `run` arms the timers after the socket is free to connect.
+   * Touches no SQLite. The browser socket waits on this hook and only gets 5 seconds
+   * (`onConnectTimeout`). Timers do not need re-arming here because Rivet persists them.
    */
   onWake: (c) => {
     let room = currentRoom(c.state.room)
@@ -126,45 +122,6 @@ export const gameRoom = actor({
     c.state.room = room
     if (recentMsgIds) c.state.recentMsgIds = recentMsgIds
     if (typeof c.state.lastSeenAt !== 'number') c.state.lastSeenAt = Date.now()
-    const previous = c.vars.settleClocks
-    let settle: () => void = () => {}
-    c.vars.clocks = new Promise<void>((resolve) => {
-      settle = resolve
-    })
-    c.vars.settleClocks = settle
-    previous?.()
-  },
-  /**
-   * After startup. Arms the round timer and the idle timer once the state save from
-   * `onWake` has finished, so those SQLite calls do not overlap that save and do not
-   * hold the browser socket.
-   *
-   * Each attempt gives up after `CLOCK_MS`. A thrown attempt is retried. The gate
-   * opens only after one attempt has armed both timers. A stuck SQLite call is waited
-   * out before the next attempt, so a retry does not stack a second transaction.
-   */
-  run: async (c) => {
-    const settle = c.vars.settleClocks
-    let delay = 250
-    while (!c.aborted) {
-      const { attempt, bounded } = armClocks(c)
-      try {
-        await bounded
-        settle?.()
-        return
-      } catch (error) {
-        console.error('failed to arm room timers', error)
-        const outcome = await waitForArm(attempt, c.abortSignal)
-        if (outcome === 'aborted') return
-        if (outcome === 'armed') {
-          settle?.()
-          return
-        }
-      }
-      if (c.aborted) return
-      await sleep(delay, c.abortSignal)
-      delay = Math.min(delay * 2, CLOCK_MS)
-    }
   },
   /**
    * Before the socket is accepted. Resume is refused when that player has no seat.
@@ -276,7 +233,6 @@ export const gameRoom = actor({
      * Forgets `msgId` if loading fails so the same command can be retried.
      */
     start: async (c, msgId: string, avoidTrackIds: number[]) => {
-      if (!(await readyClocks(c))) return
       const playerId = seated(c)
       if (!playerId) return
 
@@ -318,7 +274,9 @@ export const gameRoom = actor({
           return
         }
 
-        const begun = beginGame(pending, songs, Date.now(), guessGraceSeconds())
+        const startedAt = Date.now()
+        const grace = guessGraceSeconds()
+        const begun = beginGame(pending, songs, startedAt, grace)
         if (!begun.ok) {
           forget(c, playerId, msgId)
           c.state.room = abortStarting(pending)
@@ -327,12 +285,12 @@ export const gameRoom = actor({
           return
         }
 
-        // The "starting" write above queued a save. Let it finish before the round timer
-        // takes SQLite, then store the room and the new timer id together.
-        await c.saveState({ immediate: true })
-        const roundScheduleId = await scheduleFor(c, begun.room)
-        c.state.room = begun.room
-        c.state.roundScheduleId = roundScheduleId
+        await scheduleRound(c, begun.room)
+        // Rebuilt from the latest room so a join during the await is kept. Same `startedAt`, same deadline.
+        const latest = currentRoom(c.state.room)
+        if (!latest.starting) return
+        const final = beginGame(latest, songs, startedAt, grace)
+        c.state.room = final.ok ? final.room : begun.room
         pushViews(c)
       } catch (error) {
         const pending = currentRoom(c.state.room)
@@ -347,40 +305,29 @@ export const gameRoom = actor({
     /**
      * Records one guess. A repeated `msgId` re-sends the current view and does not score again.
      */
-    guess: async (c, msgId: string, text: string) => {
-      if (!(await readyClocks(c))) return
+    guess: (c, msgId: string, text: string) => {
       const playerId = seated(c)
       if (!playerId) return
-      if (duplicate(c, playerId, msgId) || !claim(c, playerId, msgId)) {
+      if (duplicate(c, playerId, msgId)) {
         pushOne(c)
         return
       }
-      try {
-        const guessed = submitGuess(currentRoom(c.state.room), playerId, text, Date.now())
-        if (!guessed.ok) {
-          if (guessed.room) {
-            const roundScheduleId = await scheduleFor(c, guessed.room)
-            c.state.room = guessed.room
-            c.state.roundScheduleId = roundScheduleId
-          }
-          pushViews(c)
-          fail(c, guessed.error)
-          return
-        }
-        const roundScheduleId = await scheduleFor(c, guessed.room)
-        remember(c, playerId, msgId)
-        c.state.room = guessed.room
-        c.state.roundScheduleId = roundScheduleId
+      const guessed = submitGuess(currentRoom(c.state.room), playerId, text, Date.now())
+      if (!guessed.ok) {
+        if (guessed.room) c.state.room = guessed.room
         pushViews(c)
-      } finally {
-        release(c, playerId, msgId)
+        fail(c, guessed.error)
+        return
       }
+      remember(c, playerId, msgId)
+      c.state.room = guessed.room
+      pushViews(c)
     },
     /**
-     * Advances to the next round when `roundNumber` is the one on screen, then reschedules the deadline.
+     * Advances to the next round when `roundNumber` is the one on screen, and schedules that round's deadline.
+     * The room only moves on once the timer is stored, so a failed schedule can be retried with the same `msgId`.
      */
     next: async (c, msgId: string, roundNumber: number) => {
-      if (!(await readyClocks(c))) return
       const playerId = seated(c)
       if (!playerId) return
       if (duplicate(c, playerId, msgId) || !claim(c, playerId, msgId)) {
@@ -393,10 +340,15 @@ export const gameRoom = actor({
           fail(c, stepped.error)
           return
         }
-        const roundScheduleId = await scheduleFor(c, stepped.room)
+        try {
+          await scheduleRound(c, stepped.room)
+        } catch (error) {
+          console.error('failed to schedule the round timer', error)
+          fail(c, NEXT_FAILED)
+          return
+        }
         remember(c, playerId, msgId)
         c.state.room = stepped.room
-        c.state.roundScheduleId = roundScheduleId
         pushViews(c)
       } finally {
         release(c, playerId, msgId)
@@ -440,21 +392,21 @@ export const gameRoom = actor({
       pushViews(c)
     },
     /**
-     * Rivet calls this when the scheduled round deadline fires. Not a browser action.
-     * Ignores the call when the round index no longer matches.
+     * Rivet calls this when a scheduled round deadline fires. Not a browser action.
+     * Timers are never cancelled, so a fire for another round or another game is ignored by
+     * matching `endsAt`. Timers stored before `endsAt` was passed receive Rivet's fire info
+     * in that slot instead of a number.
      */
-    _onRoundDue: async (c, roundIndex: number) => {
+    _onRoundDue: async (c, roundIndex: number, endsAt?: unknown) => {
       const room = currentRoom(c.state.room)
-      if (room.phase !== 'playing' || room.roundIndex !== roundIndex) return
-      const endsAt = room.roundEndsAt
-      if (endsAt === null) return
-      const revealed = Date.now() < endsAt ? room : syncPhase(room, Date.now())
-      const roundScheduleId = await scheduleFor(c, revealed)
-      c.state.roundScheduleId = roundScheduleId
-      if (revealed !== room) {
-        c.state.room = revealed
-        pushViews(c)
+      if (room.phase !== 'playing' || room.roundIndex !== roundIndex || room.roundEndsAt === null) return
+      if (typeof endsAt === 'number' && endsAt !== room.roundEndsAt) return
+      if (Date.now() < room.roundEndsAt) {
+        await scheduleRound(c, room)
+        return
       }
+      c.state.room = syncPhase(room, Date.now())
+      pushViews(c)
     },
     /**
      * Rivet calls this when the idle timer fires.
@@ -469,7 +421,7 @@ export const gameRoom = actor({
         return
       }
       const delay = awake ? REAP_MS : Math.max(0, REAP_MS - idleFor)
-      c.state.reapScheduleId = await replaceReap(c, delay)
+      await c.schedule.after(delay, '_reap')
     },
   },
 })
@@ -582,148 +534,12 @@ function idleSince(state: GameRoomState): number {
   return typeof state.lastSeenAt === 'number' ? state.lastSeenAt : Date.now()
 }
 
-/** Cancels one schedule id. A timer that already fired rejects; that is not a failure. */
-async function cancelSchedule(c: ClockCtx, id: string | null): Promise<void> {
-  if (!id) return
-  try {
-    await c.schedule.cancel(id)
-  } catch {
-    // The timer already fired.
-  }
-}
-
 /**
- * Persists the wake, then arms the round timer and the idle timer.
- * `saveState` finishes before either schedule call so the two SQLite users do not overlap.
- * `bounded` rejects after `CLOCK_MS`. `attempt` is the same work, so the caller can wait
- * for a timed-out save to finish before starting another one.
+ * Stores this round's deadline in Rivet. Called once per round, from `start` and `next`.
+ * `roundEndsAt` identifies the round, so a stale timer from an earlier round or game is ignored when it fires.
  */
-function armClocks(c: ClockCtx & { saveState: (opts?: { immediate?: boolean }) => Promise<void> }): {
-  attempt: Promise<void>
-  bounded: Promise<void>
-} {
-  const attempt = writeClocks(c)
-  return { attempt, bounded: withDeadline(attempt, CLOCK_MS) }
-}
-
-async function writeClocks(c: ClockCtx & { saveState: (opts?: { immediate?: boolean }) => Promise<void> }): Promise<void> {
-  await c.saveState({ immediate: true })
-  const room = currentRoom(c.state.room)
-  const roundScheduleId = await scheduleFor(c, room)
-  const reapScheduleId = await replaceReap(c, REAP_MS)
-  c.state.roundScheduleId = roundScheduleId
-  c.state.reapScheduleId = reapScheduleId
-}
-
-/** Waits until a timed-out arm finishes, or until the actor is stopping. */
-async function waitForArm(attempt: Promise<void>, signal: AbortSignal): Promise<'armed' | 'failed' | 'aborted'> {
-  const stop = whenAborted(signal)
-  const outcome = await Promise.race([
-    attempt.then(
-      () => 'armed' as const,
-      () => 'failed' as const,
-    ),
-    stop.promise.then(() => 'aborted' as const),
-  ])
-  stop.cancel()
-  if (outcome === 'aborted') void attempt.catch(() => {})
-  return outcome
-}
-
-/**
- * Waits until this wake's timers are armed so a later schedule does not overlap that SQLite work.
- * Returns false and tells this player to retry when arming is still unfinished after `CLOCK_MS`.
- * That is shorter than the action timeout, so a stuck arm does not hold the action for 120 seconds.
- */
-async function readyClocks(c: ActionCtx & { vars: RoomVars }): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(CLOCKS_NOT_READY)), CLOCK_MS)
-  })
-  try {
-    await Promise.race([c.vars.clocks, timeout])
-    return true
-  } catch {
-    fail(c, CLOCKS_NOT_READY)
-    return false
-  } finally {
-    if (timer) clearTimeout(timer)
-  }
-}
-
-/** Rejects when `work` is still pending after `ms`. A result that arrives later does not settle this promise again. */
-function withDeadline(work: Promise<void>, ms: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let settled = false
-    const timer = setTimeout(() => {
-      if (settled) return
-      settled = true
-      reject(new Error(`arming room timers timed out after ${ms}ms`))
-    }, ms)
-    work.then(
-      () => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        resolve()
-      },
-      (error: unknown) => {
-        if (settled) {
-          console.error('failed to arm room timers', error)
-          return
-        }
-        settled = true
-        clearTimeout(timer)
-        reject(error instanceof Error ? error : new Error('failed to arm room timers'))
-      },
-    )
-  })
-}
-
-function whenAborted(signal: AbortSignal): { promise: Promise<void>; cancel: () => void } {
-  if (signal.aborted) return { promise: Promise.resolve(), cancel: () => {} }
-  let onAbort: () => void = () => {}
-  const promise = new Promise<void>((resolve) => {
-    onAbort = () => resolve()
-    signal.addEventListener('abort', onAbort, { once: true })
-  })
-  return {
-    promise,
-    cancel: () => signal.removeEventListener('abort', onAbort),
-  }
-}
-
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve()
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }, ms)
-    const onAbort = () => {
-      clearTimeout(timer)
-      resolve()
-    }
-    signal.addEventListener('abort', onAbort, { once: true })
-  })
-}
-
-/**
- * Cancels the stored idle timer and returns the id of the new one.
- * The caller writes that id. Nothing is written before the awaits.
- */
-async function replaceReap(c: ClockCtx, delay: number): Promise<string> {
-  await cancelSchedule(c, c.state.reapScheduleId)
-  return c.schedule.after(delay, '_reap')
-}
-
-/**
- * Returns the round-timer id to store, or null when the round is not open.
- * Does not write state. Callers assign `c.state` after this resolves, with no await in between.
- */
-async function scheduleFor(c: ClockCtx, room: Room): Promise<string | null> {
-  await cancelSchedule(c, c.state.roundScheduleId)
-  if (room.phase !== 'playing' || room.roundEndsAt === null) return null
+async function scheduleRound(c: ClockCtx, room: Room): Promise<void> {
+  if (room.phase !== 'playing' || room.roundEndsAt === null) return
   const delay = Math.max(0, room.roundEndsAt - Date.now())
-  return c.schedule.after(delay, '_onRoundDue', room.roundIndex)
+  await c.schedule.after(delay, '_onRoundDue', room.roundIndex, room.roundEndsAt)
 }

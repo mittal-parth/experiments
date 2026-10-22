@@ -8,6 +8,9 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.test.ts'],
     testTimeout: 20_000,
+    // Actor test files share one local engine and pool, so the engine can place one file's room
+    // on another file's runner, which has that file's env.
+    fileParallelism: false,
   },
   resolve: {
     alias: {
