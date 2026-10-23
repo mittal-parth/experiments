@@ -21,6 +21,9 @@ type Env = {
   GUESS_GRACE_SECONDS?: string
   /** Comma-separated site origins. Empty allows any origin, which is what local dev wants. */
   ALLOWED_ORIGINS?: string
+  /** Production rooms POST preview batches here. Unset calls Apple directly. */
+  PREVIEW_LOOKUP_URL?: string
+  PREVIEW_LOOKUP_SECRET?: string
 }
 
 /**
@@ -167,6 +170,8 @@ export class GameRoom extends DurableObject<Env> {
         order: this.env.SONG_ORDER === 'catalog' ? 'catalog' : 'shuffle',
         // Workers must not use node:https in previews.ts; pass fetch explicitly.
         fetchImpl: fetch,
+        lookupUrl: this.env.PREVIEW_LOOKUP_URL,
+        lookupSecret: this.env.PREVIEW_LOOKUP_SECRET,
       }),
     }
   }

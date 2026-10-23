@@ -1,6 +1,6 @@
 # How a room runs
 
-One room is one Cloudflare Durable Object. The 4-character code is the object's name. The Next.js site only serves the page. A small Worker routes each request to the right room. The room is saved in the object's SQLite storage, so a refresh, an eviction or a deploy does not wipe it.
+One room is one Cloudflare Durable Object. The 4-character code is the object's name. The Next.js site serves the page and, in production, the preview lookup. A small Worker routes each request to the right room. The room is saved in the object's SQLite storage, so a refresh, an eviction or a deploy does not wipe it.
 
 The game rules still live in `src/game/room.ts`. `RoomHost` (`src/cloudflare/room-host.ts`) calls them. It does not reimplement scoring, guesses, or the phase machine. The click-by-click sequence is in [sequences.md](sequences.md).
 
@@ -14,7 +14,8 @@ flowchart LR
   browser -->|"POST, GET, wss /room/ABCD"| worker["Worker"]
   worker --> room["GameRoom Durable Object ABCD"]
   room --> sqlite["SQLite storage"]
-  room -->|"fetch"| itunes["iTunes lookup"]
+  room -->|"one batch at start"| next
+  next -->|"fetch"| itunes["iTunes lookup"]
 ```
 
 - **Worker** (`worker/index.ts`, default export). Checks the origin, then forwards `/room/:code` to `env.GAME_ROOM.getByName(code)`. `GET /health` answers `{ ok: true }`.
@@ -61,7 +62,7 @@ A Durable Object has one alarm, so it covers two things. The alarm is set to the
 | `src/cloudflare/wire.ts` | Browser to room messages and their parser. |
 | `src/game/room-service.ts` | Create validation and `msgId` dedupe, shared with the Rivet actor. |
 | `src/transport/` | `SongClient` type, the Cloudflare client, and `createRoomClient()` that picks the backend. |
-| `src/server/previews.ts` | iTunes lookup. The Durable Object passes `fetch` in. |
+| `src/server/previews.ts` | Preview lookup. Production posts one batch to `/api/preview-lookup`. Local and Rivet call Apple directly. |
 | `dev.ts` | `wrangler dev` (or the Rivet runner), then Next. |
 | `scripts/smoke-worker.mjs` | End-to-end check of a running Worker. |
 

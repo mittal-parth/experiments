@@ -100,6 +100,31 @@ describe('loadRoundSongs', () => {
     expect(resolved.map((song) => song.trackId)).toEqual([11])
   })
 
+  it('asks the site once for the round when a lookup url is set', async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { ids: number[]; country: string }
+      expect(url).toBe('https://song.mittalparth.dev/api/preview-lookup')
+      expect(init?.method).toBe('POST')
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer secret')
+      expect(body.country).toBe('in')
+      expect(body.ids).toContain(1635014240)
+      return lookupResponse(hindi.songs, (id) => body.ids.includes(id))
+    })
+    const songs = await loadRoundSongs(
+      hindi,
+      {
+        mode: 'live',
+        order: 'catalog',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        lookupUrl: 'https://song.mittalparth.dev/api/preview-lookup',
+        lookupSecret: 'secret',
+      },
+      1,
+    )
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(songs[0]?.previewUrl).toBe('https://audio.example/1635014240.m4a')
+  })
+
   it('skips songs this player already heard, then repeats the oldest once the pool is used up', async () => {
     const ids = hindi.songs.map((song) => song.trackId)
     const heard = ids.slice(0, 10)

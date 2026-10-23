@@ -29,12 +29,13 @@ Settings are `vars` in `wrangler.jsonc`:
 
 | Variable | Value |
 | --- | --- |
-| `SONG_PREVIEW_MODE` | `live` so the room calls iTunes. `fixture` is for tests. |
+| `SONG_PREVIEW_MODE` | `live` so a round loads real previews. `fixture` is for tests. |
 | `SONG_ORDER` | `shuffle`, or `catalog` to keep playlist order. |
 | `GUESS_GRACE_SECONDS` | Seconds after the clip before the round reveals. |
-| `ALLOWED_ORIGINS` | Comma-separated site origins, such as `https://doodle-bars.vercel.app`. Empty allows any origin. Set this once you know the site URL. |
+| `ALLOWED_ORIGINS` | `https://songguesser.vercel.app,https://song.mittalparth.dev`. Empty allows any origin, which local dev sets. |
+| `PREVIEW_LOOKUP_URL` | `https://song.mittalparth.dev/api/preview-lookup`. The room POSTs one batch of track ids there. |
 
-There are no secrets. Do not put any in `vars`.
+`PREVIEW_LOOKUP_SECRET` is a Worker secret and the same value on the Vercel project. It is not a `var`. The route rejects a caller that does not send it.
 
 ## 2. Vercel
 
@@ -43,6 +44,7 @@ Project root is `doodle-bars`.
 | Variable | Value |
 | --- | --- |
 | `NEXT_PUBLIC_ROOM_WS_URL` | The Worker URL with `wss://`, for example `wss://doodle-bars-rooms.<account>.workers.dev`. |
+| `PREVIEW_LOOKUP_SECRET` | Same value as the Worker secret. The preview route refuses a caller that does not send it. |
 
 `NEXT_PUBLIC_ROOM_BACKEND` can stay unset. The default is `cloudflare`. Redeploy the site after setting the URL, because `NEXT_PUBLIC_*` values are baked into the build. A build without it points at `ws://127.0.0.1:8787`.
 

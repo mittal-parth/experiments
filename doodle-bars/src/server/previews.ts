@@ -12,6 +12,9 @@ export type PreviewOptions = {
   mode: PreviewMode
   order: SongOrder
   fetchImpl?: typeof fetch
+  /** Site route that calls Apple. Unset means call Apple directly, which local dev and Rivet do. */
+  lookupUrl?: string
+  lookupSecret?: string
 }
 
 type LookupTrack = {
@@ -105,7 +108,7 @@ async function resolvePreviews(
       toRoundSong(song, '/api/fixture-tone', storeUrl(storefront, song.trackId), FIXTURE_ARTWORK),
     )
   }
-  const tracks = await lookupTracks(songs.map((song) => song.trackId), storefront, options.fetchImpl)
+  const tracks = await lookupTracks(songs.map((song) => song.trackId), storefront, options)
   const resolved: RoundSong[] = []
   for (const song of songs) {
     const match = tracks.get(song.trackId)
@@ -169,7 +172,7 @@ function withDeadline<T>(task: Promise<T>, ms: number): Promise<T> {
 async function lookupTracks(
   ids: readonly number[],
   storefront: string,
-  fetchImpl?: typeof fetch,
+  options: PreviewOptions,
 ): Promise<Map<number, CachedPreview>> {
   const now = Date.now()
   const missing: number[] = []
@@ -178,7 +181,7 @@ async function lookupTracks(
   }
   for (let index = 0; index < missing.length; index += LOOKUP_LIMIT) {
     const chunk = missing.slice(index, index + LOOKUP_LIMIT)
-    await scheduleLookup(() => fetchChunk(chunk, storefront, fetchImpl))
+    await scheduleLookup(() => fetchChunk(chunk, storefront, options))
   }
   const found = new Map<number, CachedPreview>()
   const after = Date.now()
@@ -189,18 +192,21 @@ async function lookupTracks(
   return found
 }
 
-async function fetchChunk(ids: readonly number[], storefront: string, fetchImpl?: typeof fetch): Promise<void> {
+async function fetchChunk(ids: readonly number[], storefront: string, options: PreviewOptions): Promise<void> {
   const now = Date.now()
   const need = ids.filter((id) => !readCache(storefront, id, now))
   if (need.length === 0) return
-  const url = `https://itunes.apple.com/lookup?id=${need.join(',')}&country=${encodeURIComponent(storefront)}`
-  const body = await readLookupWithRetry(url, fetchImpl)
+  const body = await readLookupWithRetry(need, storefront, options)
+  storeLookup(need, storefront, body)
+}
+
+function storeLookup(ids: readonly number[], storefront: string, body: { results?: LookupTrack[] }): void {
   const byId = new Map<number, LookupTrack>()
   for (const result of body.results ?? []) {
     if (typeof result.trackId === 'number') byId.set(result.trackId, result)
   }
   const storedAt = Date.now()
-  for (const id of need) {
+  for (const id of ids) {
     const match = byId.get(id)
     if (!match?.previewUrl) continue
     previewCache.set(cacheKey(storefront, id), {
@@ -212,11 +218,15 @@ async function fetchChunk(ids: readonly number[], storefront: string, fetchImpl?
   }
 }
 
-async function readLookupWithRetry(url: string, fetchImpl?: typeof fetch): Promise<{ results?: LookupTrack[] }> {
+async function readLookupWithRetry(
+  ids: readonly number[],
+  storefront: string,
+  options: PreviewOptions,
+): Promise<{ results?: LookupTrack[] }> {
   let last: unknown
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
     try {
-      return await readLookup(url, fetchImpl)
+      return await readLookup(ids, storefront, options)
     } catch (error) {
       last = error
       const delay = RETRY_DELAYS_MS[attempt]
@@ -252,9 +262,28 @@ function storeUrl(storefront: string, trackId: number): string {
   return `https://music.apple.com/${storefront}/song/${trackId}`
 }
 
-async function readLookup(url: string, fetchImpl?: typeof fetch): Promise<{ results?: LookupTrack[] }> {
-  if (fetchImpl) {
-    const response = await fetchImpl(url)
+async function readLookup(
+  ids: readonly number[],
+  storefront: string,
+  options: PreviewOptions,
+): Promise<{ results?: LookupTrack[] }> {
+  const lookupUrl = options.lookupUrl?.trim()
+  if (lookupUrl) {
+    const response = await (options.fetchImpl ?? fetch)(lookupUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${options.lookupSecret ?? ''}`,
+      },
+      body: JSON.stringify({ ids, country: storefront }),
+    })
+    if (!response.ok) throw new Error(`iTunes lookup failed (${response.status})`)
+    return (await response.json()) as { results?: LookupTrack[] }
+  }
+  const url = `https://itunes.apple.com/lookup?id=${ids.join(',')}&country=${encodeURIComponent(storefront)}`
+  if (options.fetchImpl) {
+    const response = await options.fetchImpl(url)
     if (!response.ok) throw new Error(`iTunes lookup failed (${response.status})`)
     return (await response.json()) as { results?: LookupTrack[] }
   }
