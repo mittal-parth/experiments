@@ -1,3 +1,11 @@
+/**
+ * Transport-neutral room orchestration for the Cloudflare backend.
+ *
+ * Mirrors `src/rivet/game-room.ts`: same hooks (wake, create, connect, actions, timers, reap),
+ * but uses `RoomPlatform` instead of Rivet's `c.state`, `c.conns`, and `c.schedule`.
+ *
+ * Pure game rules stay in `src/game/room.ts`. Shared create/dedupe helpers in `room-service.ts`.
+ */
 import { getPlaylist } from '@/catalog/registry'
 import { cleanNickname } from '@/game/names'
 import type { ServerMessage } from '@/game/protocol'
@@ -41,7 +49,10 @@ export type RoomConn = {
   send: (message: ServerMessage) => void
 }
 
-/** Everything the host needs from the runtime. The Durable Object supplies it. */
+/**
+ * Runtime surface injected by the Durable Object (or by unit tests).
+ * Keeps this module free of `cloudflare:workers` imports.
+ */
 export type RoomPlatform = {
   now: () => number
   conns: () => RoomConn[]
@@ -57,10 +68,10 @@ export type CreateResult = { ok: true } | { ok: false; status: 400 | 409; messag
 
 /**
  * One room's rules and bookkeeping. The Durable Object owns sockets and storage and calls in here.
- * Game rules live in `src/game/room.ts`. This is the same behaviour as the Rivet `gameRoom` actor.
  */
 export class RoomHost {
   private state: GameRoomState | null
+  /** Last alarm time passed to `setAlarm`; avoids rewriting the alarm on every guess. */
   private armedAt: number | null = null
 
   constructor(
@@ -70,13 +81,17 @@ export class RoomHost {
     this.state = saved
   }
 
+  /** Whether this DO has been created (POST succeeded at least once). */
   exists(): boolean {
     return this.state !== null
   }
 
   /**
-   * Runs once each time the object loads, including after eviction. A room left in `starting`
-   * goes back to the lobby so a lost song load can be retried. With no socket open, everyone is away.
+   * Runs once each time the object loads, including after eviction.
+   *
+   * - Room stuck in `starting` → lobby (retry song load).
+   * - No open sockets → mark every seated player away.
+   * - Playing past `roundEndsAt` → reveal via `syncPhase`.
    */
   wake(): void {
     const state = this.state
@@ -109,6 +124,10 @@ export class RoomHost {
     })
   }
 
+  /**
+   * First-time room creation (HTTP POST). Key must match the DO name (4-letter code).
+   * @returns `409` if storage already has a room; `400` for validation errors.
+   */
   create(input: GameRoomInput, key: string): CreateResult {
     if (this.state) return { ok: false, status: 409, message: 'That room code is already in use' }
     try {
@@ -120,7 +139,10 @@ export class RoomHost {
     }
   }
 
-  /** Decides whether a new socket may join. Sends the refusal itself. */
+  /**
+   * Gate before the WebSocket is considered open (Rivet `onBeforeConnect`).
+   * Sends `MISSING_ROOM` on the socket and returns false when resume has no seat.
+   */
   admit(conn: RoomConn, params: ConnParams): boolean {
     const state = this.state
     if (!state || (params.intent === 'resume' && !state.room.players.some((p) => p.id === params.playerId))) {
@@ -130,6 +152,10 @@ export class RoomHost {
     return true
   }
 
+  /**
+   * Socket accepted (Rivet `onConnect`). Marks a seated player present and pushes snapshots.
+   * Guests with `intent: join` are not seated until a wire `join` action runs.
+   */
   connect(conn: RoomConn): void {
     const state = this.state
     if (!state) return
@@ -142,6 +168,9 @@ export class RoomHost {
     this.pushViews()
   }
 
+  /**
+   * Socket closed (Rivet `onDisconnect`). Same `playerId` on another `conn.id` keeps them "connected".
+   */
   disconnect(conn: RoomConn): void {
     const state = this.state
     if (!state) return
@@ -156,6 +185,7 @@ export class RoomHost {
     this.pushViews()
   }
 
+  /** Dispatch a parsed wire message from `webSocketMessage`. Caller identity is `conn.playerId`. */
   async message(conn: RoomConn, request: WireRequest): Promise<void> {
     const state = this.state
     if (!state) {
@@ -191,7 +221,10 @@ export class RoomHost {
     }
   }
 
-  /** The one alarm covers the round deadline and the idle reaper. */
+  /**
+   * Single DO alarm: round deadline reveal, then idle reap logic (Rivet `_onRoundDue` + `_reap`).
+   * Always ends with `rearm()` unless the room was destroyed.
+   */
   async alarm(): Promise<void> {
     this.armedAt = null
     const state = this.state
@@ -205,6 +238,7 @@ export class RoomHost {
     const current = this.requireState()
     const awake = this.platform.conns().length > 0 || current.room.players.some((player) => player.connected)
     if (awake) {
+      // Something is live: push the 6h idle window forward (Rivet `_reap` with awake=true).
       this.commit({ ...current, lastSeenAt: now })
     } else if (now - idleSince(current) >= REAP_MS) {
       await this.destroy()
@@ -265,6 +299,10 @@ export class RoomHost {
     this.pushViews()
   }
 
+  /**
+   * Host starts the game: mark starting, load iTunes previews (async), then `beginGame`.
+   * On failure, `abortStart` clears `msgId` so the client can retry the same id.
+   */
   private async start(conn: RoomConn, msgId: string, avoidTrackIds: number[]): Promise<void> {
     const playerId = this.seated(conn)
     if (!playerId) return
@@ -369,6 +407,7 @@ export class RoomHost {
     this.pushViews()
   }
 
+  /** Removes the seat; destroys the DO when the last player leaves (Rivet `c.destroy`). */
   private async leave(conn: RoomConn): Promise<void> {
     const state = this.requireState()
     const next = leaveRoom(state.room, conn.playerId, this.platform.now())
@@ -425,6 +464,7 @@ export class RoomHost {
     this.commit(holder.state)
   }
 
+  /** Returns this connection's player id when they have a seat; otherwise sends an error. */
   private seated(conn: RoomConn): string | null {
     if (!this.room().players.some((player) => player.id === conn.playerId)) {
       this.fail(conn, 'Join a room first')
@@ -433,13 +473,17 @@ export class RoomHost {
     return conn.playerId
   }
 
+  /** Persist, then schedule the next alarm if the deadline changed. */
   private commit(state: GameRoomState): void {
     this.state = state
     this.platform.save(state)
     this.rearm()
   }
 
-  /** The alarm is a billed write, so it only moves when the next due time actually changes. */
+  /**
+   * One alarm covers both round end and idle reap: fire at min(roundEndsAt, lastSeenAt + REAP_MS).
+   * Skips `setAlarm` when the target is unchanged (alarm writes cost money on the free tier).
+   */
   private rearm(): void {
     const state = this.state
     if (!state) return
@@ -452,6 +496,7 @@ export class RoomHost {
     this.platform.setAlarm(target)
   }
 
+  /** Fan out per-player views (Rivet `pushViews` / `snapshot` events). */
   private pushViews(): void {
     const room = this.stateOrNull()?.room
     if (!room) return
@@ -462,6 +507,7 @@ export class RoomHost {
     }
   }
 
+  /** Duplicate `msgId`: resend current view to the caller only (idempotent retries). */
   private pushOne(conn: RoomConn): void {
     const view = toView(this.room(), conn.playerId)
     if (!view) return

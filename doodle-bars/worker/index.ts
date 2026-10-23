@@ -1,3 +1,12 @@
+/**
+ * Cloudflare Worker entry and the `GameRoom` Durable Object.
+ *
+ * Two layers:
+ * - Default export: thin router (`/health`, `/room/:code`), CORS, origin check, then `getByName(code)`.
+ * - `GameRoom`: one DO instance per 4-character code; HTTP create/exists + hibernating WebSockets.
+ *
+ * Game rules live in `src/cloudflare/room-host.ts`, not here.
+ */
 import { DurableObject } from 'cloudflare:workers'
 import { RoomHost, type RoomConn, type RoomPlatform } from '@/cloudflare/room-host'
 import { parseWireRequest } from '@/cloudflare/wire'
@@ -14,17 +23,28 @@ type Env = {
   ALLOWED_ORIGINS?: string
 }
 
+/**
+ * Stored on each hibernating WebSocket. Survives DO sleep; used to rebuild `RoomConn` on wake.
+ * `connId` distinguishes two tabs for the same `playerId`.
+ */
 type Attachment = { playerId: string; connId: string }
 
+/** Single persisted blob for the room (`room`, `recentMsgIds`, `lastSeenAt`). */
 const STATE_KEY = 'state'
+
+/** `WebSocket.readyState` value for an open socket. */
 const SOCKET_OPEN = 1
 
-/** One room. The 4-character code is the object name. Rules live in `RoomHost`. */
+/**
+ * One room. The 4-character code is the Durable Object name (see outer `getByName`).
+ * This class is only I/O: storage, alarms, WebSockets, and env → `RoomPlatform`.
+ */
 export class GameRoom extends DurableObject<Env> {
   private host!: RoomHost
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
+    // No fetch/WebSocket/alarm until state is loaded and wake() has run (Rivet onWake parity).
     void ctx.blockConcurrencyWhile(async () => {
       const saved = await ctx.storage.get<GameRoomState>(STATE_KEY)
       this.host = new RoomHost(this.platform(), saved ?? null)
@@ -32,6 +52,13 @@ export class GameRoom extends DurableObject<Env> {
     })
   }
 
+  /**
+   * Per-room HTTP surface forwarded from the outer Worker.
+   *
+   * - `POST` — create room (browser does this before opening the WebSocket).
+   * - `GET` without upgrade — exists check (`resolve()` on the client).
+   * - `GET` with `Upgrade: websocket` — play; query `playerId` + `intent=join|resume`.
+   */
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
     const code = cleanCode(url.pathname.split('/').at(-1) ?? '')
@@ -61,11 +88,13 @@ export class GameRoom extends DurableObject<Env> {
 
     const pair = new WebSocketPair()
     const [client, server] = [pair[0], pair[1]]
+    // Hibernation API: the DO can sleep while sockets stay connected (lower duration billing).
     this.ctx.acceptWebSocket(server)
     const attachment: Attachment = { playerId: params.playerId, connId: crypto.randomUUID() }
     server.serializeAttachment(attachment)
     const conn = toConn(server)
     if (!conn) return json({ error: 'Bad request' }, 400)
+    // admit = onBeforeConnect; connect = onConnect + initial snapshots.
     if (this.host.admit(conn, params)) {
       this.host.connect(conn)
     } else {
@@ -74,6 +103,7 @@ export class GameRoom extends DurableObject<Env> {
     return new Response(null, { status: 101, webSocket: client })
   }
 
+  /** Inbound frames after upgrade; parsed in `wire.ts`, handled in `RoomHost.message`. */
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     const conn = toConn(ws)
     if (!conn) return
@@ -100,14 +130,20 @@ export class GameRoom extends DurableObject<Env> {
     if (conn) this.host.disconnect(conn)
   }
 
+  /** DO alarm handler; round reveal and idle reap are multiplexed in `RoomHost.alarm`. */
   async alarm(): Promise<void> {
     await this.host.alarm()
   }
 
+  /** Cloudflare-specific backend for `RoomHost` (keeps room logic free of Workers imports). */
   private platform(): RoomPlatform {
     return {
       now: () => Date.now(),
-      conns: () => this.ctx.getWebSockets().flatMap((ws) => (ws.readyState === SOCKET_OPEN ? [toConn(ws)] : [])).filter(isConn),
+      conns: () =>
+        this.ctx
+          .getWebSockets()
+          .flatMap((ws) => (ws.readyState === SOCKET_OPEN ? [toConn(ws)] : []))
+          .filter(isConn),
       save: (state) => {
         void this.ctx.storage.put(STATE_KEY, state)
       },
@@ -129,6 +165,7 @@ export class GameRoom extends DurableObject<Env> {
       previewOptions: () => ({
         mode: this.env.SONG_PREVIEW_MODE === 'fixture' ? 'fixture' : 'live',
         order: this.env.SONG_ORDER === 'catalog' ? 'catalog' : 'shuffle',
+        // Workers must not use node:https in previews.ts; pass fetch explicitly.
         fetchImpl: fetch,
       }),
     }
@@ -139,6 +176,7 @@ function isConn(value: RoomConn | null): value is RoomConn {
   return value !== null
 }
 
+/** Map a DO WebSocket (+ attachment) to the transport-neutral `RoomConn` the host uses. */
 function toConn(ws: WebSocket): RoomConn | null {
   const attachment = ws.deserializeAttachment() as Attachment | null
   if (!attachment) return null
@@ -178,6 +216,10 @@ function corsHeaders(request: Request): Record<string, string> {
   }
 }
 
+/**
+ * Outer Worker: routes by path, does not run room logic.
+ * All `/room/:code` traffic is delegated to the named Durable Object.
+ */
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
@@ -199,6 +241,7 @@ export default {
     }
     if (request.method === 'GET') {
       const response = await room.fetch(request)
+      // WebSocket upgrade must not be wrapped with extra CORS body handling.
       if (response.status === 101) return response
       const headers = new Headers(response.headers)
       for (const [key, value] of Object.entries(corsHeaders(request))) headers.set(key, value)
