@@ -447,7 +447,15 @@ function Playing({
       <RoundHeading view={view} />
       <DrawablyCard className="panel panel-sea" seed={18} stroke="#1f8a70" fill="#1f8a70">
         <div className="stack">
-          {view.clip ? <ClipPlayer key={view.roundNumber} url={view.clip.previewUrl} seconds={view.clipSeconds} /> : null}
+          {view.clip ? (
+            <ClipPlayer
+              key={view.roundNumber}
+              url={view.clip.previewUrl}
+              seconds={view.clipSeconds}
+              startsAt={view.clipStartsAt}
+              serverNow={view.serverNow}
+            />
+          ) : null}
           <p className="quiet">This clip is {view.clipSeconds} seconds, from later in the preview.</p>
           <p className="quiet">
             {view.answer === 'artist'

@@ -11,8 +11,9 @@ import { DurableObject } from 'cloudflare:workers'
 import { RoomHost, type RoomConn, type RoomPlatform } from '@/cloudflare/room-host'
 import { parseWireRequest } from '@/cloudflare/wire'
 import { cleanCode } from '@/game/names'
-import { MISSING_ROOM } from '@/rivet/errors'
 import { readConnParams, type GameRoomInput, type GameRoomState } from '@/game/room-service'
+import { graceSecondsFrom } from '@/game/score'
+import { MISSING_ROOM } from '@/rivet/errors'
 
 type Env = {
   GAME_ROOM: DurableObjectNamespace<GameRoom>
@@ -35,9 +36,6 @@ type Attachment = { playerId: string; connId: string }
 /** Single persisted blob for the room (`room`, `recentMsgIds`, `lastSeenAt`). */
 const STATE_KEY = 'state'
 
-/** `WebSocket.readyState` value for an open socket. */
-const SOCKET_OPEN = 1
-
 /**
  * One room. The 4-character code is the Durable Object name (see outer `getByName`).
  * This class is only I/O: storage, alarms, WebSockets, and env → `RoomPlatform`.
@@ -51,7 +49,7 @@ export class GameRoom extends DurableObject<Env> {
     void ctx.blockConcurrencyWhile(async () => {
       const saved = await ctx.storage.get<GameRoomState>(STATE_KEY)
       this.host = new RoomHost(this.platform(), saved ?? null)
-      this.host.wake()
+      await this.host.wake()
     })
   }
 
@@ -74,7 +72,7 @@ export class GameRoom extends DurableObject<Env> {
       } catch {
         return json({ error: 'Bad request' }, 400)
       }
-      const created = this.host.create(input, code)
+      const created = await this.host.create(input, code)
       if (!created.ok) return json({ error: created.message }, created.status)
       return json({ ok: true }, 201)
     }
@@ -99,7 +97,7 @@ export class GameRoom extends DurableObject<Env> {
     if (!conn) return json({ error: 'Bad request' }, 400)
     // admit = onBeforeConnect; connect = onConnect + initial snapshots.
     if (this.host.admit(conn, params)) {
-      this.host.connect(conn)
+      await this.host.connect(conn)
     } else {
       server.close(1000, 'room not available')
     }
@@ -123,19 +121,41 @@ export class GameRoom extends DurableObject<Env> {
     }
   }
 
-  webSocketClose(ws: WebSocket): void {
+  /**
+   * Compatibility date is 2025-09-01, before `web_socket_auto_reply_to_close`.
+   * The runtime does not answer the close frame unless we do. An unanswered close
+   * surfaces to the browser as 1006 and the socket can look open while it is dead.
+   * https://developers.cloudflare.com/durable-objects/best-practices/websockets/
+   */
+  async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+    finishClose(ws, code, reason)
     const conn = toConn(ws)
-    if (conn) this.host.disconnect(conn)
+    if (conn) await this.host.disconnect(conn)
   }
 
-  webSocketError(ws: WebSocket): void {
+  async webSocketError(ws: WebSocket): Promise<void> {
+    finishClose(ws, 1011, 'socket error')
     const conn = toConn(ws)
-    if (conn) this.host.disconnect(conn)
+    if (conn) await this.host.disconnect(conn)
   }
 
-  /** DO alarm handler; round reveal and idle reap are multiplexed in `RoomHost.alarm`. */
-  async alarm(): Promise<void> {
-    await this.host.alarm()
+  /**
+   * Round reveal and idle reap. Alarms are at-least-once, so `RoomHost.alarm` checks the
+   * stored deadline before revealing. On the last automatic retry, schedule another alarm
+   * instead of letting the retry budget run out.
+   * https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/
+   */
+  async alarm(alarmInfo: AlarmInvocationInfo): Promise<void> {
+    try {
+      await this.host.alarm()
+    } catch (error) {
+      console.error('room alarm failed', error)
+      if (alarmInfo.retryCount >= 5) {
+        await this.ctx.storage.setAlarm(Date.now() + 30_000)
+        return
+      }
+      throw error
+    }
   }
 
   /** Cloudflare-specific backend for `RoomHost` (keeps room logic free of Workers imports). */
@@ -145,11 +165,9 @@ export class GameRoom extends DurableObject<Env> {
       conns: () =>
         this.ctx
           .getWebSockets()
-          .flatMap((ws) => (ws.readyState === SOCKET_OPEN ? [toConn(ws)] : []))
+          .flatMap((ws) => (ws.readyState === WebSocket.OPEN ? [toConn(ws)] : []))
           .filter(isConn),
-      save: (state) => {
-        void this.ctx.storage.put(STATE_KEY, state)
-      },
+      save: (state) => this.ctx.storage.put(STATE_KEY, state),
       wipe: async () => {
         for (const ws of this.ctx.getWebSockets()) {
           try {
@@ -161,10 +179,9 @@ export class GameRoom extends DurableObject<Env> {
         await this.ctx.storage.deleteAlarm()
         await this.ctx.storage.deleteAll()
       },
-      setAlarm: (at) => {
-        if (at === null) void this.ctx.storage.deleteAlarm()
-        else void this.ctx.storage.setAlarm(at)
-      },
+      setAlarm: (at) => (at === null ? this.ctx.storage.deleteAlarm() : this.ctx.storage.setAlarm(at)),
+      // Bindings live on `env`. `process.env` does not see them on this compatibility date.
+      graceSeconds: () => graceSecondsFrom(this.env.GUESS_GRACE_SECONDS),
       previewOptions: () => ({
         mode: this.env.SONG_PREVIEW_MODE === 'fixture' ? 'fixture' : 'live',
         order: this.env.SONG_ORDER === 'catalog' ? 'catalog' : 'shuffle',
@@ -174,6 +191,16 @@ export class GameRoom extends DurableObject<Env> {
         lookupSecret: this.env.PREVIEW_LOOKUP_SECRET,
       }),
     }
+  }
+}
+
+/** Echo a close the browser is allowed to receive. 1005 and 1006 cannot be sent. */
+function finishClose(ws: WebSocket, code: number, reason: string): void {
+  const usable = code === 1000 || (code >= 3000 && code <= 4999)
+  try {
+    ws.close(usable ? code : 1000, usable ? reason.slice(0, 123) : '')
+  } catch {
+    // already closed, or the runtime answered the frame itself
   }
 }
 

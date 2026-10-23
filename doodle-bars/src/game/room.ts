@@ -395,7 +395,7 @@ export function leaveRoom(room: Room, playerId: string, now: number): Room | nul
   return syncPhase(next, now)
 }
 
-export function toView(room: Room, playerId: string): RoomView | null {
+export function toView(room: Room, playerId: string, now = Date.now()): RoomView | null {
   const you = room.players.find((player) => player.id === playerId)
   if (!you) return null
   const song = room.roundIndex >= 0 ? room.songs[room.roundIndex] : undefined
@@ -446,6 +446,8 @@ export function toView(room: Room, playerId: string): RoomView | null {
         : [],
     lastGuess: room.feedback[playerId] ?? null,
     roundEndsAt: room.phase === 'playing' ? room.roundEndsAt : null,
+    clipStartsAt: room.phase === 'playing' ? room.roundStartedAt : null,
+    serverNow: now,
     starting: room.starting,
   }
 }

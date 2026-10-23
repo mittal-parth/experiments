@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { makeCode, makeId } from '@/game/ids'
 import type { RoomView, ServerMessage } from '@/game/protocol'
 import { REAP_MS, type ConnParams, type GameRoomInput, type GameRoomState } from '@/game/room-service'
+import { guessGraceSeconds } from '@/game/score'
 import { MISSING_ROOM } from '@/rivet/errors'
 import { clearPreviewCache } from '@/server/previews'
 import { RoomHost, type RoomConn, type RoomPlatform } from './room-host'
@@ -25,6 +26,8 @@ function makeRuntime(saved: GameRoomState | null = null, previewOptions: RoomPla
     alarm: null as number | null,
     alarmWrites: 0,
     wiped: false,
+    grace: null as number | null,
+    saveGate: null as null | (() => void | Promise<void>),
     host: null as unknown as RoomHost,
   }
   const platform: RoomPlatform = {
@@ -32,6 +35,7 @@ function makeRuntime(saved: GameRoomState | null = null, previewOptions: RoomPla
     conns: () => runtime.sockets,
     save: (state) => {
       runtime.saved = structuredClone(state)
+      return runtime.saveGate?.()
     },
     wipe: async () => {
       runtime.wiped = true
@@ -43,6 +47,7 @@ function makeRuntime(saved: GameRoomState | null = null, previewOptions: RoomPla
       runtime.alarm = at
       runtime.alarmWrites += 1
     },
+    graceSeconds: () => runtime.grace ?? guessGraceSeconds(),
     previewOptions,
   }
   runtime.host = new RoomHost(platform, saved)
@@ -69,26 +74,26 @@ function hostInput(code: string, hostId: string, extra?: Partial<GameRoomInput>)
   }
 }
 
-function open(runtime: Runtime, playerId: string, intent: ConnParams['intent']): FakeConn | null {
+async function open(runtime: Runtime, playerId: string, intent: ConnParams['intent']): Promise<FakeConn | null> {
   const inbox: ServerMessage[] = []
   const conn: FakeConn = { id: makeId(), playerId, inbox, send: (message) => inbox.push(message) }
   if (!runtime.host.admit(conn, { playerId, intent })) return null
   runtime.sockets.push(conn)
-  runtime.host.connect(conn)
+  await runtime.host.connect(conn)
   return conn
 }
 
-function close(runtime: Runtime, conn: FakeConn): void {
+async function close(runtime: Runtime, conn: FakeConn): Promise<void> {
   runtime.sockets = runtime.sockets.filter((other) => other.id !== conn.id)
-  runtime.host.disconnect(conn)
+  await runtime.host.disconnect(conn)
 }
 
-function hosted(extra?: Partial<GameRoomInput>) {
+async function hosted(extra?: Partial<GameRoomInput>) {
   const runtime = makeRuntime()
   const code = makeCode()
   const playerId = makeId()
-  expect(runtime.host.create(hostInput(code, playerId, extra), code)).toEqual({ ok: true })
-  const conn = open(runtime, playerId, 'resume')
+  expect(await runtime.host.create(hostInput(code, playerId, extra), code)).toEqual({ ok: true })
+  const conn = await open(runtime, playerId, 'resume')
   if (!conn) throw new Error('host could not connect')
   return { runtime, code, playerId, conn }
 }
@@ -115,27 +120,27 @@ it('has no room until one is created', () => {
   expect(conn.inbox).toEqual([{ type: 'error', message: MISSING_ROOM }])
 })
 
-it('refuses a second create for a live code and rejects bad input', () => {
-  const { runtime, code } = hosted()
-  expect(runtime.host.create(hostInput(code, makeId()), code)).toMatchObject({ ok: false, status: 409 })
+it('refuses a second create for a live code and rejects bad input', async () => {
+  const { runtime, code } = await hosted()
+  expect(await runtime.host.create(hostInput(code, makeId()), code)).toMatchObject({ ok: false, status: 409 })
   const fresh = makeRuntime()
-  expect(fresh.host.create(hostInput('ABCD', 'h', { nickname: '!' }), 'ABCD')).toMatchObject({ ok: false, status: 400 })
-  expect(fresh.host.create(hostInput('ABCD', 'h', { playlistId: 'nope' }), 'ABCD')).toMatchObject({
+  expect(await fresh.host.create(hostInput('ABCD', 'h', { nickname: '!' }), 'ABCD')).toMatchObject({ ok: false, status: 400 })
+  expect(await fresh.host.create(hostInput('ABCD', 'h', { playlistId: 'nope' }), 'ABCD')).toMatchObject({
     ok: false,
     status: 400,
     message: 'Unknown playlist',
   })
-  expect(fresh.host.create(hostInput('??', 'h'), '??')).toMatchObject({ ok: false, status: 400 })
+  expect(await fresh.host.create(hostInput('??', 'h'), '??')).toMatchObject({ ok: false, status: 400 })
   expect(fresh.host.exists()).toBe(false)
 })
 
-it('refuses a resume for a player who has no seat', () => {
-  const { runtime } = hosted()
-  expect(open(runtime, 'stranger', 'resume')).toBeNull()
+it('refuses a resume for a player who has no seat', async () => {
+  const { runtime } = await hosted()
+  expect(await open(runtime, 'stranger', 'resume')).toBeNull()
 })
 
 it('plays a solo round without leaking the title, then reveals on the right guess', async () => {
-  const { runtime, conn } = hosted()
+  const { runtime, conn } = await hosted()
   expect(lastView(conn).phase).toBe('lobby')
   await send(runtime, conn, { type: 'start', msgId: makeId(), avoidTrackIds: [] })
   const playing = lastView(conn)
@@ -158,7 +163,7 @@ it('plays a solo round without leaking the title, then reveals on the right gues
 })
 
 it('loads the number of songs the host asked for', async () => {
-  const { runtime, conn } = hosted({ roundCount: 3, clipSeconds: 5 })
+  const { runtime, conn } = await hosted({ roundCount: 3, clipSeconds: 5 })
   expect(lastView(conn).roundCount).toBe(3)
   await send(runtime, conn, { type: 'start', msgId: makeId(), avoidTrackIds: [] })
   expect(lastView(conn).totalRounds).toBe(3)
@@ -166,7 +171,7 @@ it('loads the number of songs the host asked for', async () => {
 })
 
 it('does not score a repeated guess', async () => {
-  const { runtime, conn } = hosted()
+  const { runtime, conn } = await hosted()
   await send(runtime, conn, { type: 'start', msgId: makeId(), avoidTrackIds: [] })
   const msgId = makeId()
   await send(runtime, conn, { type: 'guess', msgId, text: 'nope' })
@@ -176,44 +181,44 @@ it('does not score a repeated guess', async () => {
 })
 
 it('tells a stranger to join before finishing', async () => {
-  const { runtime } = hosted()
-  const stranger = open(runtime, makeId(), 'join')
+  const { runtime } = await hosted()
+  const stranger = await open(runtime, makeId(), 'join')
   if (!stranger) throw new Error('stranger should connect')
   await send(runtime, stranger, { type: 'next', msgId: makeId(), roundNumber: 1 })
   expect(errors(stranger).at(-1)).toBe('Join a room first')
 })
 
 it('seats a second player and shows both on every screen', async () => {
-  const { runtime, conn } = hosted({ mode: 'room' })
+  const { runtime, conn } = await hosted({ mode: 'room' })
   const guestId = makeId()
-  const guest = open(runtime, guestId, 'join')
+  const guest = await open(runtime, guestId, 'join')
   if (!guest) throw new Error('guest should connect')
   await send(runtime, guest, { type: 'join', nickname: 'Riya' })
   expect(lastView(conn).players.map((player) => player.nickname)).toEqual(['Aman', 'Riya'])
   expect(lastView(guest).you.nickname).toBe('Riya')
 
-  close(runtime, guest)
+  await close(runtime, guest)
   expect(lastView(conn).players.find((player) => player.nickname === 'Riya')?.connected).toBe(false)
-  const back = open(runtime, guestId, 'resume')
+  const back = await open(runtime, guestId, 'resume')
   expect(back).not.toBeNull()
   expect(lastView(conn).players.find((player) => player.nickname === 'Riya')?.connected).toBe(true)
 })
 
 it('keeps a player present while another tab of theirs is open', async () => {
-  const { runtime, conn, playerId } = hosted({ mode: 'room' })
-  const second = open(runtime, playerId, 'resume')
+  const { runtime, conn, playerId } = await hosted({ mode: 'room' })
+  const second = await open(runtime, playerId, 'resume')
   if (!second) throw new Error('second tab')
-  close(runtime, second)
+  await close(runtime, second)
   expect(lastView(conn).players[0]?.connected).toBe(true)
 })
 
 it('lets the same player finish from a second connection', async () => {
-  const { runtime, conn, playerId } = hosted()
+  const { runtime, conn, playerId } = await hosted()
   await send(runtime, conn, { type: 'start', msgId: makeId(), avoidTrackIds: [] })
   await send(runtime, conn, { type: 'guess', msgId: makeId(), text: 'Kesariya' })
   const roundNumber = lastView(conn).roundNumber
-  close(runtime, conn)
-  const rebound = open(runtime, playerId, 'resume')
+  await close(runtime, conn)
+  const rebound = await open(runtime, playerId, 'resume')
   if (!rebound) throw new Error('resume')
   await send(runtime, rebound, { type: 'next', msgId: makeId(), roundNumber })
   expect(lastView(rebound).phase).toBe('done')
@@ -221,13 +226,13 @@ it('lets the same player finish from a second connection', async () => {
 })
 
 it('arms the one alarm at the round deadline and reveals when it fires with nobody connected', async () => {
-  const { runtime, conn } = hosted({ clipSeconds: 3 })
+  const { runtime, conn } = await hosted({ clipSeconds: 3 })
   await send(runtime, conn, { type: 'start', msgId: makeId(), avoidTrackIds: [] })
   const endsAt = runtime.saved?.room.roundEndsAt
   expect(typeof endsAt).toBe('number')
   expect(runtime.alarm).toBe(endsAt)
 
-  close(runtime, conn)
+  await close(runtime, conn)
   runtime.clock = (endsAt ?? 0) + 1
   await runtime.host.alarm()
   expect(runtime.saved?.room.phase).toBe('reveal')
@@ -235,7 +240,7 @@ it('arms the one alarm at the round deadline and reveals when it fires with nobo
 })
 
 it('ignores an alarm that fires before the deadline and arms it again', async () => {
-  const { runtime, conn } = hosted()
+  const { runtime, conn } = await hosted()
   await send(runtime, conn, { type: 'start', msgId: makeId(), avoidTrackIds: [] })
   const endsAt = runtime.saved?.room.roundEndsAt
   runtime.clock += 1_000
@@ -244,8 +249,15 @@ it('ignores an alarm that fires before the deadline and arms it again', async ()
   expect(runtime.alarm).toBe(endsAt)
 })
 
+it('times the round from the platform grace', async () => {
+  const { runtime, conn } = await hosted({ clipSeconds: 1 })
+  runtime.grace = 3
+  await send(runtime, conn, { type: 'start', msgId: makeId(), avoidTrackIds: [] })
+  expect(runtime.saved?.room.roundEndsAt).toBe(T0 + 4_000)
+})
+
 it('does not rewrite the alarm for a guess', async () => {
-  const { runtime, conn } = hosted()
+  const { runtime, conn } = await hosted()
   await send(runtime, conn, { type: 'start', msgId: makeId(), avoidTrackIds: [] })
   const writes = runtime.alarmWrites
   await send(runtime, conn, { type: 'guess', msgId: makeId(), text: 'nope' })
@@ -253,13 +265,13 @@ it('does not rewrite the alarm for a guess', async () => {
 })
 
 it('reaps a room nobody has touched for six hours, but not one with a socket', async () => {
-  const { runtime, conn } = hosted()
+  const { runtime, conn } = await hosted()
   runtime.clock = T0 + REAP_MS + 1
   await runtime.host.alarm()
   expect(runtime.wiped).toBe(false)
   expect(runtime.alarm).toBe(runtime.clock + REAP_MS)
 
-  close(runtime, conn)
+  await close(runtime, conn)
   runtime.clock += REAP_MS + 1
   await runtime.host.alarm()
   expect(runtime.wiped).toBe(true)
@@ -267,7 +279,7 @@ it('reaps a room nobody has touched for six hours, but not one with a socket', a
 })
 
 it('destroys the room when the last player leaves', async () => {
-  const { runtime, conn } = hosted()
+  const { runtime, conn } = await hosted()
   await send(runtime, conn, { type: 'leave' })
   expect(conn.inbox.at(-1)).toEqual({ type: 'left' })
   expect(runtime.wiped).toBe(true)
@@ -277,8 +289,8 @@ it('destroys the room when the last player leaves', async () => {
 })
 
 it('keeps the room when one of two players leaves', async () => {
-  const { runtime, conn } = hosted({ mode: 'room' })
-  const guest = open(runtime, makeId(), 'join')
+  const { runtime, conn } = await hosted({ mode: 'room' })
+  const guest = await open(runtime, makeId(), 'join')
   if (!guest) throw new Error('guest')
   await send(runtime, guest, { type: 'join', nickname: 'Riya' })
   await send(runtime, guest, { type: 'leave' })
@@ -291,14 +303,14 @@ it('puts a room left in starting back in the lobby and marks everyone away on wa
   const stuck = makeRuntime(null, () => ({ mode: 'live', order: 'catalog', fetchImpl: () => pending }))
   const code = makeCode()
   const hostId = makeId()
-  stuck.host.create(hostInput(code, hostId), code)
-  const stuckConn = open(stuck, hostId, 'resume')
+  await stuck.host.create(hostInput(code, hostId), code)
+  const stuckConn = await open(stuck, hostId, 'resume')
   if (!stuckConn) throw new Error('host')
   void send(stuck, stuckConn, { type: 'start', msgId: makeId(), avoidTrackIds: [] })
   await vi.waitFor(() => expect(stuck.saved?.room.starting).toBe(true))
 
   const woke = makeRuntime(stuck.saved)
-  woke.host.wake()
+  await woke.host.wake()
   expect(woke.saved?.room.starting).toBe(false)
   expect(woke.saved?.room.players.every((player) => !player.connected)).toBe(true)
 })
@@ -311,8 +323,8 @@ it('returns the room to the lobby and reports an error when song loading fails',
   }))
   const code = makeCode()
   const hostId = makeId()
-  runtime.host.create(hostInput(code, hostId), code)
-  const conn = open(runtime, hostId, 'resume')
+  await runtime.host.create(hostInput(code, hostId), code)
+  const conn = await open(runtime, hostId, 'resume')
   if (!conn) throw new Error('host')
   const msgId = makeId()
   await send(runtime, conn, { type: 'start', msgId, avoidTrackIds: [] })
@@ -323,20 +335,37 @@ it('returns the room to the lobby and reports an error when song loading fails',
 })
 
 it('persists across a reload of the host object', async () => {
-  const { runtime, conn, playerId } = hosted()
+  const { runtime, conn, playerId } = await hosted()
   await send(runtime, conn, { type: 'start', msgId: makeId(), avoidTrackIds: [] })
   const reloaded = makeRuntime(runtime.saved)
-  reloaded.host.wake()
-  const back = open(reloaded, playerId, 'resume')
+  await reloaded.host.wake()
+  const back = await open(reloaded, playerId, 'resume')
   if (!back) throw new Error('resume after reload')
   expect(lastView(back).phase).toBe('playing')
 })
 
+it('publishes a guess only after the save finishes', async () => {
+  const { runtime, conn } = await hosted()
+  await send(runtime, conn, { type: 'start', msgId: makeId(), avoidTrackIds: [] })
+  const gates: Array<() => void> = []
+  runtime.saveGate = () =>
+    new Promise<void>((resolve) => {
+      gates.push(() => resolve())
+    })
+  const pending = send(runtime, conn, { type: 'guess', msgId: makeId(), text: 'nope' })
+  await vi.waitFor(() => expect(gates.length).toBe(1))
+  expect(runtime.saved?.room.guesses).toHaveLength(1)
+  expect(lastView(conn).guesses).toHaveLength(0)
+  gates[0]?.()
+  await pending
+  expect(lastView(conn).guesses).toHaveLength(1)
+})
+
 it('reveals on wake when the deadline passed while the object was evicted', async () => {
-  const { runtime, conn } = hosted({ clipSeconds: 3 })
+  const { runtime, conn } = await hosted({ clipSeconds: 3 })
   await send(runtime, conn, { type: 'start', msgId: makeId(), avoidTrackIds: [] })
   const reloaded = makeRuntime(runtime.saved)
   reloaded.clock = (runtime.saved?.room.roundEndsAt ?? 0) + 1
-  reloaded.host.wake()
+  await reloaded.host.wake()
   expect(reloaded.saved?.room.phase).toBe('reveal')
 })

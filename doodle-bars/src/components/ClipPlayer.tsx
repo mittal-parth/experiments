@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { captureGameEvent } from '@/analytics/posthog-client'
-import { clipStartSeconds } from '@/game/clip'
+import { clipPlayhead } from '@/game/clip'
 import { AppButton } from './AppButton'
 import { NoteIcon } from './Doodles'
 
@@ -43,15 +43,32 @@ function clipLabel(status: ClipStatus): string {
   }
 }
 
-export function ClipPlayer({ url, seconds }: { url: string; seconds: number }) {
+export function ClipPlayer({
+  url,
+  seconds,
+  startsAt,
+  serverNow,
+}: {
+  url: string
+  seconds: number
+  startsAt: number | null
+  serverNow: number
+}) {
   const [status, setStatus] = useState<ClipStatus>('loading')
   const [startAt, setStartAt] = useState(0)
+  const [heardAt, setHeardAt] = useState(0)
   const windowRef = useRef({ from: 0, end: seconds })
   const readyRef = useRef(false)
   const pendingPlay = useRef(true)
+  const serverNowRef = useRef(serverNow)
+  serverNowRef.current = serverNow
+  const clockRef = useRef({ originServer: serverNow, originLocal: Date.now() })
 
   useEffect(() => {
     const audio = audioElement()
+    const originServer = serverNowRef.current
+    const originLocal = Date.now()
+    clockRef.current = { originServer, originLocal }
     let stopped = false
     let placed = false
     let seekTries = 0
@@ -60,8 +77,26 @@ export function ClipPlayer({ url, seconds }: { url: string; seconds: number }) {
     pendingPlay.current = true
     setStatus('loading')
 
+    const elapsedSeconds = () => {
+      if (startsAt == null) return 0
+      const serverTime = originServer + (Date.now() - originLocal)
+      return Math.max(0, (serverTime - startsAt) / 1000)
+    }
+
+    const finish = () => {
+      readyRef.current = true
+      pendingPlay.current = false
+      audio.pause()
+      if (!stopped) setStatus('done')
+    }
+
     const playFromWindow = () => {
       if (stopped || !pendingPlay.current || starting) return
+      const playhead = clipPlayhead(audio.duration, seconds, elapsedSeconds())
+      if (playhead.finished) {
+        finish()
+        return
+      }
       starting = true
       void audio.play().then(
         () => {
@@ -76,37 +111,50 @@ export function ClipPlayer({ url, seconds }: { url: string; seconds: number }) {
       )
     }
 
-    const placePlayhead = () => {
-      if (stopped || placed) return
-      if (!Number.isFinite(audio.duration) || audio.duration <= 0) return
-      placed = true
-      const from = clipStartSeconds(audio.duration, seconds)
-      windowRef.current = { from, end: from + seconds }
-      setStartAt(from)
-      if (Math.abs(audio.currentTime - from) < 0.08) {
+    const seekToSharedTime = (allowFallback: boolean) => {
+      const playhead = clipPlayhead(audio.duration, seconds, elapsedSeconds())
+      windowRef.current = { from: playhead.from, end: playhead.from + seconds }
+      setStartAt(playhead.from)
+      setHeardAt(Math.round(playhead.target * 10) / 10)
+      if (playhead.finished) {
+        finish()
+        return
+      }
+      if (Math.abs(audio.currentTime - playhead.target) < 0.08) {
         readyRef.current = true
         playFromWindow()
         return
       }
-      audio.currentTime = from
+      if (!allowFallback && audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return
+      audio.currentTime = playhead.target
+    }
+
+    const placePlayhead = () => {
+      if (stopped || placed) return
+      if (!Number.isFinite(audio.duration) || audio.duration <= 0) return
+      placed = true
+      seekToSharedTime(true)
     }
 
     // Previews are about 30 seconds and the clip starts late in the file, so
     // playback waits until that offset is buffered. Setting currentTime before
     // the file can seek is ignored and does not fire seeked — retry, then play
-    // the opening rather than leaving the round silent.
+    // from wherever we landed rather than leaving the round silent.
     const onSeeked = () => {
       if (stopped || !placed) return
-      const { from } = windowRef.current
-      if (audio.currentTime + 0.15 < from) {
+      const playhead = clipPlayhead(audio.duration, seconds, elapsedSeconds())
+      setHeardAt(Math.round(playhead.target * 10) / 10)
+      if (playhead.finished) {
+        finish()
+        return
+      }
+      if (audio.currentTime + 0.15 < playhead.target) {
         if (audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return
         seekTries += 1
         if (seekTries <= 4) {
-          audio.currentTime = from
+          audio.currentTime = playhead.target
           return
         }
-        windowRef.current = { from: 0, end: seconds }
-        setStartAt(0)
       }
       readyRef.current = true
       playFromWindow()
@@ -114,11 +162,14 @@ export function ClipPlayer({ url, seconds }: { url: string; seconds: number }) {
 
     const onTime = () => {
       if (!readyRef.current) return
+      if (elapsedSeconds() >= seconds) {
+        finish()
+        return
+      }
       const { from, end } = windowRef.current
       if (audio.currentTime + 0.15 < from) return
       if (audio.currentTime + 0.05 < end) return
-      audio.pause()
-      if (!stopped) setStatus('done')
+      finish()
     }
 
     const onCanPlay = () => {
@@ -127,10 +178,14 @@ export function ClipPlayer({ url, seconds }: { url: string; seconds: number }) {
         placePlayhead()
         return
       }
-      const { from } = windowRef.current
+      const playhead = clipPlayhead(audio.duration, seconds, elapsedSeconds())
+      if (playhead.finished) {
+        finish()
+        return
+      }
       const playable = audio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA
-      if (!readyRef.current && playable && audio.currentTime + 0.15 < from) {
-        audio.currentTime = from
+      if (!readyRef.current && playable && audio.currentTime + 0.15 < playhead.target) {
+        audio.currentTime = playhead.target
       }
     }
 
@@ -159,7 +214,7 @@ export function ClipPlayer({ url, seconds }: { url: string; seconds: number }) {
       audio.removeEventListener('canplay', onCanPlay)
       audio.removeEventListener('error', onError)
     }
-  }, [url, seconds])
+  }, [url, seconds, startsAt])
 
   function play() {
     captureGameEvent('clip_played', { clip_seconds: seconds })
@@ -174,8 +229,17 @@ export function ClipPlayer({ url, seconds }: { url: string; seconds: number }) {
       setStatus('loading')
       return
     }
-    const { from } = windowRef.current
-    if (Math.abs(audio.currentTime - from) < 0.08) {
+    const { originServer, originLocal } = clockRef.current
+    const elapsed =
+      startsAt == null ? 0 : Math.max(0, (originServer + (Date.now() - originLocal) - startsAt) / 1000)
+    const playhead = clipPlayhead(audio.duration, seconds, elapsed)
+    setStartAt(playhead.from)
+    setHeardAt(Math.round(playhead.target * 10) / 10)
+    if (playhead.finished) {
+      setStatus('done')
+      return
+    }
+    if (Math.abs(audio.currentTime - playhead.target) < 0.08) {
       readyRef.current = true
       void audio.play().then(
         () => {
@@ -189,7 +253,7 @@ export function ClipPlayer({ url, seconds }: { url: string; seconds: number }) {
       return
     }
     setStatus('loading')
-    audio.currentTime = from
+    audio.currentTime = playhead.target
   }
 
   const playerClass =
@@ -197,7 +261,7 @@ export function ClipPlayer({ url, seconds }: { url: string; seconds: number }) {
 
   return (
     <div className="clip">
-      <p data-testid="clip-status" className="clip-status" data-start={startAt}>
+      <p data-testid="clip-status" className="clip-status" data-start={startAt} data-at={heardAt}>
         {status}
       </p>
       <div className={playerClass}>

@@ -161,12 +161,14 @@ export function useRoom() {
       setWaiting(false)
       reportClientError(REPLY_TIMEOUT_ERROR, 'reply_timeout')
       setError(REPLY_TIMEOUT_ERROR)
-      if (connRef.current?.connStatus !== 'connected') {
-        const stale = connRef.current
-        connRef.current = null
-        if (stale) void stale.dispose()
-        scheduleReconnectRef.current()
-      }
+      // A socket can stay "open" after the room has stopped reading it. Drop it
+      // and open another one so the last command is sent again.
+      const stale = connRef.current
+      if (!stale) return
+      replayed.current = false
+      connRef.current = null
+      void stale.dispose()
+      scheduleReconnectRef.current()
     }, REPLY_TIMEOUT_MS)
   }, [])
 
@@ -267,7 +269,13 @@ export function useRoom() {
         const command = lastCommand.current
         if (command && !replayed.current) {
           replayed.current = true
-          void runReplay(conn, command).catch(() => {})
+          void runReplay(conn, command).catch(() => {
+            if (connRef.current !== conn) return
+            replayed.current = false
+            connRef.current = null
+            void conn.dispose()
+            scheduleReconnectRef.current()
+          })
         }
       }
     })
@@ -454,7 +462,13 @@ export function useRoom() {
           const conn = connRef.current
           if (conn?.connStatus === 'connected') {
             replayed.current = true
-            void runReplay(conn, command).catch(() => {})
+            void runReplay(conn, command).catch(() => {
+              if (connRef.current !== conn) return
+              replayed.current = false
+              connRef.current = null
+              void conn.dispose()
+              scheduleReconnectRef.current()
+            })
             return
           }
           replayed.current = false

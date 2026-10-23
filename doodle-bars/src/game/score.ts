@@ -31,8 +31,13 @@ export function roundDurationMs(clipSeconds: number, graceSeconds: number): numb
   return (clampClipSeconds(clipSeconds) + graceSeconds) * 1000
 }
 
+/** Seconds of guessing after the clip. Unset, blank, or below 1 falls back to 12. Capped at 120. */
+export function graceSecondsFrom(raw: unknown): number {
+  const value = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(value) || value < 1) return 12
+  return Math.min(120, Math.floor(value))
+}
+
 export function guessGraceSeconds(): number {
-  const raw = Number(process.env.GUESS_GRACE_SECONDS)
-  if (!Number.isFinite(raw) || raw < 1) return 12
-  return Math.min(120, Math.floor(raw))
+  return graceSecondsFrom(process.env.GUESS_GRACE_SECONDS)
 }
