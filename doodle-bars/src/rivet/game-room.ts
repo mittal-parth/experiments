@@ -1,12 +1,11 @@
 import { getPlaylist } from '@/catalog/registry'
-import { cleanCode, cleanNickname } from '@/game/names'
+import { cleanNickname } from '@/game/names'
 import type { AnswerMode, RoomView } from '@/game/protocol'
 import {
   abortStarting,
   advance,
   beginGame,
   configureRoom,
-  createRoom,
   joinRoom,
   leaveRoom,
   markStarting,
@@ -17,14 +16,23 @@ import {
   toView,
   type Room,
 } from '@/game/room'
+import {
+  RoomInputError,
+  REAP_MS,
+  createInitialState,
+  duplicate,
+  forget,
+  idleSince,
+  readConnParams,
+  remember,
+  trackIds,
+} from '@/game/room-service'
 import { guessGraceSeconds } from '@/game/score'
 import { loadRoundSongs, previewOptionsFromEnv } from '@/server/previews'
 import { UserError, actor, event } from 'rivetkit'
 import { MISSING_ROOM } from './errors'
 import type { ActionCtx, ClockCtx, ConnParams, GameRoomInput, GameRoomState, RoomCtx } from './types'
 
-const MSG_LIMIT = 32
-const REAP_MS = 6 * 60 * 60 * 1000
 const ACTION_TIMEOUT_MS = 120_000
 const NEXT_FAILED = 'Could not start the next round. Try again.'
 
@@ -47,33 +55,11 @@ export const gameRoom = actor({
    * Once, when the actor is first created. Returns the saved room.
    */
   createState: (c, input: GameRoomInput): GameRoomState => {
-    // validate user nickname
-    const nickname = cleanNickname(input.nickname)
-    if (!nickname) throw new UserError('Use 2-16 letters or numbers')
-
-    // fetch the selected playlist
-    const playlist = getPlaylist(input.playlistId)
-    if (!playlist) throw new UserError('Unknown playlist')
-
-    // validate room code. room code is the actor key
-    const code = cleanCode(c.key[0] ?? '')
-    if (!code) throw new UserError('That room code is not valid')
-
-    // initialize the room with initial details 
-    return {
-      room: createRoom({
-        code,
-        hostId: input.hostId,
-        nickname,
-        playlistId: playlist.id,
-        playlistName: playlist.name,
-        clipSeconds: input.clipSeconds,
-        roundCount: input.roundCount,
-        mode: input.mode,
-        answer: input.answer,
-      }),
-      recentMsgIds: {},
-      lastSeenAt: Date.now(),
+    try {
+      return createInitialState(input, c.key[0] ?? '', Date.now())
+    } catch (error) {
+      if (error instanceof RoomInputError) throw new UserError(error.message)
+      throw error
     }
   },
   /**
@@ -91,7 +77,7 @@ export const gameRoom = actor({
    * Every new socket. Saves `{ playerId, intent }` on that connection, not on the room.
    */
   createConnState: (_c, params: ConnParams): ConnParams => {
-    const parsed = readParams(params)
+    const parsed = readConnParams(params)
     if (!parsed) throw new UserError('Join a room first')
     return parsed
   },
@@ -128,7 +114,7 @@ export const gameRoom = actor({
    * `createConnState` only checks the shape of the params. This checks the room.
    */
   onBeforeConnect: (c, params: ConnParams) => {
-    const parsed = readParams(params)
+    const parsed = readConnParams(params)
     if (!parsed) throw new UserError('Join a room first')
     if (parsed.intent === 'resume' && !c.state.room.players.some((player) => player.id === parsed.playerId)) {
       throw new UserError(MISSING_ROOM)
@@ -431,15 +417,6 @@ function currentRoom(room: Room): Room {
   return JSON.parse(JSON.stringify(room)) as Room
 }
 
-/** Accepts `{ playerId, intent }` from a connect handshake. Returns null when the shape is wrong. */
-function readParams(params: unknown): ConnParams | null {
-  if (typeof params !== 'object' || params === null) return null
-  if (!('playerId' in params) || typeof params.playerId !== 'string') return null
-  if (params.playerId.length === 0 || params.playerId.length > 80) return null
-  if (!('intent' in params) || (params.intent !== 'join' && params.intent !== 'resume')) return null
-  return { playerId: params.playerId, intent: params.intent }
-}
-
 /** Player id for this connection when they have a seat. Otherwise sends "Join a room first". */
 function seated(c: ActionCtx): string | null {
   const playerId = c.conn.state.playerId
@@ -468,45 +445,6 @@ function release(c: { vars: { pendingMsgIds: Set<string> } }, playerId: string, 
   c.vars.pendingMsgIds.delete(msgKey(playerId, msgId))
 }
 
-/** True when this player already applied `msgId`. An empty id is never treated as a repeat. */
-function duplicate(c: { state: GameRoomState }, playerId: string, msgId: string): boolean {
-  if (!msgId) return false
-  return (c.state.recentMsgIds[playerId] ?? []).includes(msgId)
-}
-
-/** Stores `msgId` for this player, keeping the last 32. */
-function remember(c: { state: GameRoomState }, playerId: string, msgId: string): void {
-  if (!msgId) return
-  const prior = c.state.recentMsgIds[playerId] ?? []
-  const next = prior.filter((id) => id !== msgId)
-  next.push(msgId)
-  while (next.length > MSG_LIMIT) next.shift()
-  c.state.recentMsgIds = { ...c.state.recentMsgIds, [playerId]: next }
-}
-
-/** Drops `msgId` so a failed start can be retried with the same id. */
-function forget(c: { state: GameRoomState }, playerId: string, msgId: string): void {
-  if (!msgId) return
-  const prior = c.state.recentMsgIds[playerId]
-  if (!prior) return
-  c.state.recentMsgIds = {
-    ...c.state.recentMsgIds,
-    [playerId]: prior.filter((id) => id !== msgId),
-  }
-}
-
-/** Positive integer track ids from the client, capped at 500, so a new round can avoid songs already played. */
-function trackIds(value: unknown): number[] {
-  if (!Array.isArray(value)) return []
-  const ids: number[] = []
-  for (const item of value) {
-    if (typeof item !== 'number' || !Number.isInteger(item) || item <= 0) continue
-    ids.push(item)
-    if (ids.length > 500) ids.shift()
-  }
-  return ids
-}
-
 /** Sends each connection its own snapshot. Skips a connection that has no seat yet. */
 function pushViews(c: RoomCtx): void {
   const room = currentRoom(c.state.room)
@@ -527,11 +465,6 @@ function pushOne(c: ActionCtx): void {
 /** Sends an error event to the connection that just called. Other players do not see it. */
 function fail(c: ActionCtx, message: string): void {
   c.conn.send('error', { message })
-}
-
-/** Milliseconds since the last socket. Rooms saved before `lastSeenAt` existed count as just seen. */
-function idleSince(state: GameRoomState): number {
-  return typeof state.lastSeenAt === 'number' ? state.lastSeenAt : Date.now()
 }
 
 /**

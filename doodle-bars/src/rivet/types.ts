@@ -1,28 +1,7 @@
 import type { AnswerMode, RoomView } from '@/game/protocol'
-import type { Room } from '@/game/room'
+import type { ConnParams, GameRoomInput, GameRoomState } from '@/game/room-service'
 
-export type GameRoomInput = {
-  code: string
-  hostId: string
-  nickname: string
-  playlistId: string
-  clipSeconds: number
-  roundCount: number
-  mode: 'solo' | 'room'
-  answer: AnswerMode
-}
-
-export type ConnParams = {
-  playerId: string
-  intent: 'join' | 'resume'
-}
-
-export type GameRoomState = {
-  room: Room
-  recentMsgIds: Record<string, string[]>
-  /** When the room last had a socket. Idle reaping is measured from this. */
-  lastSeenAt: number
-}
+export type { ConnParams, GameRoomInput, GameRoomState } from '@/game/room-service'
 
 export type SnapshotEvent = { playerId: string; view: RoomView }
 export type ErrorEvent = { message: string }
