@@ -474,18 +474,25 @@ export class RoomHost {
     return conn.playerId
   }
 
-  /** Persist, then schedule the next alarm if the deadline changed. Snapshots wait for this. */
+  /**
+   * Persist the room and its alarm together.
+   * SQLite-backed Durable Objects coalesce storage calls made in one turn into one transaction.
+   * Awaiting the save before `setAlarm` would commit the room and leave the old alarm behind.
+   * Snapshots wait until both calls finish, which is the WebSocket form of the output gate.
+   */
   private async commit(state: GameRoomState): Promise<void> {
     this.state = state
-    await this.platform.save(state)
-    await this.rearm()
+    const saved = this.platform.save(state)
+    const armed = this.arm()
+    await Promise.all([Promise.resolve(saved), Promise.resolve(armed)])
   }
 
   /**
    * One alarm covers both round end and idle reap: fire at min(roundEndsAt, lastSeenAt + REAP_MS).
    * Skips `setAlarm` when the target is unchanged (alarm writes cost money on the free tier).
+   * Returns the storage call without awaiting, so `commit` can coalesce it with the room save.
    */
-  private async rearm(): Promise<void> {
+  private arm(): void | Promise<void> {
     const state = this.state
     if (!state) return
     const reapAt = idleSince(state) + REAP_MS
@@ -494,7 +501,11 @@ export class RoomHost {
     const target = roundAt !== null ? Math.min(roundAt, reapAt) : reapAt
     if (target === this.armedAt) return
     this.armedAt = target
-    await this.platform.setAlarm(target)
+    return this.platform.setAlarm(target)
+  }
+
+  private async rearm(): Promise<void> {
+    await this.arm()
   }
 
   /** Fan out per-player views (Rivet `pushViews` / `snapshot` events). */
