@@ -16,10 +16,15 @@ const rivetEnv = {
 
 /** Worker vars that a local run may override from the shell. The rest come from wrangler.jsonc. */
 const WORKER_VARS = ['SONG_PREVIEW_MODE', 'SONG_ORDER', 'GUESS_GRACE_SECONDS'] as const
-const workerVars = WORKER_VARS.flatMap((name) => {
-  const value = process.env[name]
-  return value === undefined ? [] : ['--var', `${name}:${value}`]
-})
+const workerVars = [
+  ...WORKER_VARS.flatMap((name) => {
+    const value = process.env[name]
+    return value === undefined ? [] : ['--var', `${name}:${value}`]
+  }),
+  // Production allows only the live site and sends previews through it. Local calls Apple directly.
+  '--var', `ALLOWED_ORIGINS:${process.env.ALLOWED_ORIGINS ?? ''}`,
+  '--var', `PREVIEW_LOOKUP_URL:${process.env.PREVIEW_LOOKUP_URL ?? ''}`,
+]
 
 const runner =
   backend === 'rivet'

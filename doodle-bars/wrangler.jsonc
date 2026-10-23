@@ -9,10 +9,27 @@
     "bindings": [{ "name": "GAME_ROOM", "class_name": "GameRoom" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameRoom"] }],
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true
+    },
+    "traces": {
+      "enabled": false,
+      "head_sampling_rate": 1,
+      "persist": true
+    },
+    "issues": {
+      "enabled": true
+    }
+  },
   "vars": {
     "SONG_PREVIEW_MODE": "live",
     "SONG_ORDER": "shuffle",
     "GUESS_GRACE_SECONDS": "12",
-    "ALLOWED_ORIGINS": ""
+    "ALLOWED_ORIGINS": "https://songguesser.vercel.app,https://song.mittalparth.dev",
+    "PREVIEW_LOOKUP_URL": "https://song.mittalparth.dev/api/preview-lookup"
   }
 }
