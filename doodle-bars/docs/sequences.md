@@ -1,6 +1,6 @@
 # A game, step by step
 
-Each diagram is one stretch of a room. "Rivet" is Rivet Cloud in production and the local runner on port 6420 in dev. The actor runs inside your process either way. Snapshots are per connection. A player never receives another player's view.
+These diagrams use the Rivet names. On the default Cloudflare backend, "Rivet" is the Worker and "Actor" is the `GameRoom` Durable Object, and the steps are the same. Each diagram is one stretch of a room. "Rivet" is Rivet Cloud in production and the local runner on port 6420 in dev. The actor runs inside your process either way. Snapshots are per connection. A player never receives another player's view.
 
 ## Host opens a room, guest joins
 

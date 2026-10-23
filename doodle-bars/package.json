@@ -9,6 +9,7 @@
     "start": "next start --hostname 127.0.0.1",
     "runner": "NODE_OPTIONS='--conditions=react-server' tsx runner.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p worker",
+    "smoke:worker": "node scripts/smoke-worker.mjs",
     "worker": "wrangler dev --ip 127.0.0.1 --port 8787",
     "deploy:worker": "wrangler deploy",
     "test": "vitest run",

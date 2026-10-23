@@ -1,4 +1,6 @@
-# How useRoom calls Rivet
+# How useRoom calls the room backend
+
+`useRoom` talks to a `SongClient` (`src/transport/types.ts`). `createRoomClient()` in `src/transport/index.ts` returns the Cloudflare client by default or the Rivet client when `NEXT_PUBLIC_ROOM_BACKEND=rivet`. Both expose the same `gameRoom.create`, `gameRoom.get(...).resolve()` and `connect(...)` shape, so everything below holds for either. The text names Rivet because that was the first backend. On Cloudflare, `create` is a `POST /room/CODE`, `resolve` is a `GET /room/CODE`, and `connect` is a WebSocket to `/room/CODE` with the same `{ playerId, intent }`.
 
 `GameApp` still calls `send({ type: 'guess', text })` and the other `ClientMessage` values. `useRoom` does not write those objects onto a WebSocket. It turns each one into a different Rivet call.
 
