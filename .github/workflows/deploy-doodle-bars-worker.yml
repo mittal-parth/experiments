@@ -1,0 +1,40 @@
+name: Deploy doodle-bars worker
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - doodle-bars/worker/**
+      - doodle-bars/src/cloudflare/**
+      - doodle-bars/src/catalog/**
+      - doodle-bars/src/game/**
+      - doodle-bars/src/server/**
+      - doodle-bars/src/rivet/**
+      - doodle-bars/wrangler.jsonc
+      - doodle-bars/package.json
+      - doodle-bars/package-lock.json
+      - doodle-bars/tsconfig.json
+      - .github/workflows/deploy-doodle-bars-worker.yml
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-doodle-bars-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: doodle-bars
+          packageManager: npm

@@ -9,3 +9,4 @@ blob-report
 .env*.local
 .rivet
 .env
+.wrangler

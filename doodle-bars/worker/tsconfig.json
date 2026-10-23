@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["esnext"],
+    "types": ["@cloudflare/workers-types", "node"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "paths": { "@/*": ["../src/*"] }
+  },
+  "include": ["./**/*.ts", "../src/cloudflare/**/*.ts", "../src/game/**/*.ts", "../src/catalog/**/*.ts", "../src/server/previews.ts", "../src/rivet/errors.ts"],
+  "exclude": ["../src/**/*.test.ts"]
+}

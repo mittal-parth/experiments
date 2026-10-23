@@ -1,89 +1,74 @@
 # How a room runs
 
-One room is one Rivet actor. The 4-character code is the actor's key. The Next.js site only serves the page. A separate Node process runs the actor. Rivet stores the room, so a refresh does not wipe it.
+One room is one Cloudflare Durable Object. The 4-character code is the object's name. The Next.js site only serves the page. A small Worker routes each request to the right room. The room is saved in the object's SQLite storage, so a refresh, an eviction or a deploy does not wipe it.
 
-The game rules still live in `src/game/room.ts`. The actor calls those functions. It does not reimplement scoring, guesses, or the phase machine. The click-by-click sequence is in [sequences.md](sequences.md).
+The game rules still live in `src/game/room.ts`. `RoomHost` (`src/cloudflare/room-host.ts`) calls them. It does not reimplement scoring, guesses, or the phase machine. The click-by-click sequence is in [sequences.md](sequences.md).
 
-## Locally there is no Rivet Cloud
+The Rivet backend is still in the repo as an alternate. See [architecture-rivet.md](architecture-rivet.md). Pick one with `NEXT_PUBLIC_ROOM_BACKEND` (`cloudflare` is the default).
 
-`npm run dev` starts two processes.
-
-```mermaid
-flowchart LR
-  browser["Browser"] -->|"the page"| next["Next on port 3000"]
-  browser -->|"create, connect, actions"| runner["Runner on port 6420"]
-  runner --> actor["gameRoom actor"]
-  actor --> disk["~/.rivetkit"]
-```
-
-Next serves the UI and, in fixture mode, the tone at `/api/fixture-tone`. The browser's Rivet client talks to `http://127.0.0.1:6420`. That process is both the engine and the place the actor code runs. Room state is a file under `~/.rivetkit`. No account and no `RIVET_ENDPOINT` are required.
-
-`dev.ts` starts the runner first and waits until port 6420 accepts a connection. Then it starts Next. If Next came up first, the page would load and every create would fail.
-
-## In production Rivet Cloud sits in the middle
+## Pieces
 
 ```mermaid
 flowchart LR
-  browser["Browser"] -->|"the page"| vercel["Next on Vercel"]
-  browser -->|"publishable pk_ URL"| cloud["Rivet Cloud"]
-  vm["Your VM, Railway, or Fly"] -->|"outbound secret sk_ URL"| cloud
+  browser["Browser"] -->|"the page"| next["Next on Vercel"]
+  browser -->|"POST, GET, wss /room/ABCD"| worker["Worker"]
+  worker --> room["GameRoom Durable Object ABCD"]
+  room --> sqlite["SQLite storage"]
+  room -->|"fetch"| itunes["iTunes lookup"]
 ```
 
-The browser never opens a socket to your machine. It talks to Rivet Cloud with the publishable URL (`pk_`). That URL is safe to ship in the Next bundle as `NEXT_PUBLIC_RIVET_ENDPOINT`.
+- **Worker** (`worker/index.ts`, default export). Checks the origin, then forwards `/room/:code` to `env.GAME_ROOM.getByName(code)`. `GET /health` answers `{ ok: true }`.
+- **`GameRoom`** (`worker/index.ts`). The Durable Object. It owns the WebSockets, storage and the alarm. It accepts sockets with the Hibernation API, so an idle room costs no duration.
+- **`RoomHost`** (`src/cloudflare/room-host.ts`). One room's rules and bookkeeping, with no Cloudflare imports. The object hands it a small `RoomPlatform` (clock, sockets, save, alarm, wipe). This is what the unit tests drive.
+- **`wire.ts`** (`src/cloudflare/wire.ts`). The JSON the browser sends. The server sends `ServerMessage` from `src/game/protocol.ts`.
+- **Browser client** (`src/transport/cloudflare-client.ts`). Implements the same `SongClient` shape the Rivet client has, so `useRoom` is the same for both. The socket reconnects on its own with a 0.5 to 5 second backoff.
 
-Your process does the opposite of a public server. On boot, `runner.ts` calls `registry.start()`. With `RIVET_ENDPOINT` set to the secret URL (`sk_`), that process dials out to Rivet Cloud and waits. You do not register a public URL for it. Outbound HTTPS to Rivet and to iTunes is enough.
+## Requests
 
-```mermaid
-flowchart LR
-  browser["Browser"] -->|"create ABCD"| cloud["Rivet Cloud"]
-  cloud -->|"run gameRoom for ABCD"| vm["Your process"]
-  vm --> actor["Actor code in the VM"]
-  actor -->|"save the room"| cloud
-  cloud -->|"snapshot event"| browser
-```
+| Browser does | Request |
+| --- | --- |
+| Host a room | `POST /room/ABCD` with the create input. `201`, or `409` when the code is taken. `400` for a bad nickname or playlist. |
+| Check a room exists | `GET /room/ABCD`. `200`, or `404` "No room with that code". |
+| Play | WebSocket `/room/ABCD?playerId=...&intent=join` or `resume`. |
 
-Create, join, and guess arrive at Rivet Cloud first. Cloud decides which connected runner should run that key, and sends the call to your process. The actor function runs there. The saved room lives in Rivet, not in the VM's memory. The snapshot event travels back through Cloud to the browser that is connected to that room.
+Over the socket the browser sends `join`, `configure`, `start`, `guess`, `next`, `restart` and `leave`. The caller is the socket's `playerId`, never a field in the body. The room replies with `snapshot` (each socket gets its own view), `error` and `left`. A resume for a player who has no seat gets `error: No room with that code` and the socket closes.
 
-A guess from a second browser uses the same key, so Cloud delivers it to the same actor. That is the thing the old in-memory `Map` could not do once Vercel put two people on two instances.
+## Timers: one alarm
 
-iTunes lookups also happen inside the actor, on your machine, during `start`. The Next app does not call iTunes.
+A Durable Object has one alarm, so it covers two things. The alarm is set to the earlier of the round deadline (`room.roundEndsAt`, only while playing) and the idle reap time (`lastSeenAt` plus 6 hours).
+
+- When it fires after the deadline, the round is revealed, even with nobody connected.
+- When it fires for the reaper: if a socket is open or a player is marked present, `lastSeenAt` moves to now. Otherwise, past 6 hours idle, the room is destroyed (`deleteAll`).
+- An alarm that fires early only re-arms. A stale one cannot reveal the wrong round, because the deadline is read from the room.
+- The alarm is a billed write, so `RoomHost` only calls `setAlarm` when the target time changes. A guess does not.
 
 ## What survives what
 
 | Event | Room |
 | --- | --- |
-| Socket drops | Stays. The player is marked away. |
-| VM restarts | Stays in Rivet. The next connect wakes the actor on a runner. |
-| Last player presses Leave | `c.destroy()`. The next `get` fails. |
-| Everyone disconnected for 6 hours | `_reap` destroys it. |
-| Someone connects again | The 6-hour timer is reset. |
-
-The idle reaper is scheduled once in `onCreate` and `_reap` re-arms itself. The round timer is scheduled once when a round starts (`start` or `next`): `c.schedule.after(delay, '_onRoundDue', roundIndex, roundEndsAt)`. Rivet keeps those schedules across sleep and restarts, so `onWake` does not touch SQLite. `_onRoundDue` ignores a fire when `endsAt` no longer matches, which covers leftover timers from an earlier game. The timer still fires when no browser is connected. `onWake` runs `syncPhase` so a round that ended while the process was down is revealed when the actor wakes. `onWake` is synchronous and must stay fast: the browser socket only waits about 5 seconds for the connect hook to finish.
+| Socket drops | Stays. The player is marked away. The client reconnects. |
+| Object evicted or Worker deployed | Stays in storage. The next connect loads it. On load, a round whose deadline passed is revealed, a stuck song load goes back to the lobby, and players with no socket are marked away. |
+| Last player presses Leave | `deleteAll`. The next `GET` is a `404`. |
+| Everyone disconnected for 6 hours | The alarm destroys it. |
 
 ## Where the code lives
 
 | File | Role |
 | --- | --- |
-| `src/rivet/registry.ts` | Registers the one actor type, `gameRoom`. |
-| `src/rivet/game-room.ts` | The actor. Actions, timer, presence, destroy. |
-| `src/rivet/types.ts` | Saved state, connection params, and the browser's picture of the client. |
-| `src/rivet/errors.ts` | "No room with that code", and the collision check used when two hosts mint the same code. |
-| `src/rivet/browser-client.ts` | `createClient` pointed at the public endpoint. |
-| `src/components/useRoom.ts` | The only browser caller. See [actions.md](actions.md). |
-| `runner.ts` | `registry.start()` plus a health watchdog that exits when Rivet's link is stale. |
-| `src/server/runner-watchdog.ts` | Polls `registry.routes.health()` and event-loop lag; triggers process exit for Docker restart. |
-| `dev.ts` | Runner, then Next. |
-| `Dockerfile` | Node 22 Debian image that runs `runner.ts`. |
-| `src/game/room.ts` | Unchanged game rules. |
+| `worker/index.ts` | Worker router and the `GameRoom` Durable Object. |
+| `wrangler.jsonc` | Binding, SQLite migration, vars. `server-only` is aliased to an empty module. |
+| `src/cloudflare/room-host.ts` | The room's logic over a `RoomPlatform`. |
+| `src/cloudflare/wire.ts` | Browser to room messages and their parser. |
+| `src/game/room-service.ts` | Create validation and `msgId` dedupe, shared with the Rivet actor. |
+| `src/transport/` | `SongClient` type, the Cloudflare client, and `createRoomClient()` that picks the backend. |
+| `src/server/previews.ts` | iTunes lookup. The Durable Object passes `fetch` in. |
+| `dev.ts` | `wrangler dev` (or the Rivet runner), then Next. |
+| `scripts/smoke-worker.mjs` | End-to-end check of a running Worker. |
 
-`src/server/hub.ts`, `src/app/api/ws/route.ts`, and `server.ts` are gone. Those were the in-memory map, the Vercel socket route (`maxDuration` 300), and the custom server that held the socket open.
+## Choosing the backend
 
-## Notes from review
+`NEXT_PUBLIC_ROOM_BACKEND` is read in the browser, so it is fixed when the site is built. `next.config.ts` defines it as `cloudflare` unless it is `rivet`. That makes the bundler drop `rivetkit` from the default build. A room lives only in the backend that created it. Changing the flag strands existing rooms.
 
-**One missing-room sentence.** A code that was never created and a saved seat whose room is gone both surface as "No room with that code". The actor throws that from `onBeforeConnect` when a resume names a player who is not seated. A missing actor (`not_found`) is mapped to the same sentence in `explainConnectError`.
+## Local dev
 
-**Types.** Shared Rivet shapes live in `src/rivet/types.ts`. That includes the saved room, the socket params, and the browser client types.
-
-**`next.config.ts`.** Removed. It only existed to mark the `ws` package external, and that package is gone. Next uses its defaults.
-
-**`AGENTS.md`.** Next writes this file when `next dev` runs. The "breaking changes" paragraph is Next 16 telling an agent that this Next version differs from older Next. It is not about the room actor. Deleting the file makes the next dev run write it again.
+`npm run dev` starts `wrangler dev` on port 8787, waits for it, then starts Next with `NEXT_PUBLIC_ROOM_WS_URL=ws://127.0.0.1:8787`. State is under `.wrangler/state` (git-ignored). No Cloudflare account or login is needed. `ROOM_BACKEND=rivet npm run dev` starts the Rivet runner instead.

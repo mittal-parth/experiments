@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "doodle-bars-rooms",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "alias": { "server-only": "./worker/server-only.ts" },
+  "durable_objects": {
+    "bindings": [{ "name": "GAME_ROOM", "class_name": "GameRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameRoom"] }],
+  "vars": {
+    "SONG_PREVIEW_MODE": "live",
+    "SONG_ORDER": "shuffle",
+    "GUESS_GRACE_SECONDS": "12",
+    "ALLOWED_ORIGINS": ""
+  }
+}

@@ -8,7 +8,10 @@
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
     "runner": "NODE_OPTIONS='--conditions=react-server' tsx runner.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p worker",
+    "smoke:worker": "node scripts/smoke-worker.mjs",
+    "worker": "wrangler dev --ip 127.0.0.1 --port 8787",
+    "deploy:worker": "wrangler deploy",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },
@@ -29,12 +32,14 @@
     "server-only": "^0.0.1"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261023.1",
     "@playwright/test": "^1.63.0",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "wrangler": "^4.152.0"
   }
 }

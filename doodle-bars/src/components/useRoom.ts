@@ -5,9 +5,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { makeCode, makeId } from '@/game/ids'
 import { cleanCode } from '@/game/names'
 import type { AnswerMode, ClientMessage, RoomView } from '@/game/protocol'
-import { createSongClient } from '@/rivet/browser-client'
+import { createRoomClient } from '@/transport'
 import { errorText, explainConnectError, isMissingActor, isTakenCode, MISSING_ROOM } from '@/rivet/errors'
-import type { GameRoomInput, SongClient, SongConn } from '@/rivet/types'
+import type { GameRoomInput } from '@/game/room-service'
+import type { SongClient, SongConn } from '@/transport/types'
 
 const SESSION_KEY = 'song-guesser-session'
 const REPLY_TIMEOUT_MS = 8_000
@@ -327,7 +328,7 @@ export function useRoom() {
   }, [view?.code])
 
   useEffect(() => {
-    const client = createSongClient()
+    const client = createRoomClient()
     clientRef.current = client
     const stored = readStoredSession()
     const urlCode = cleanCode(new URLSearchParams(window.location.search).get('code') ?? '')
