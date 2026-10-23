@@ -56,11 +56,12 @@ export type RoomConn = {
 export type RoomPlatform = {
   now: () => number
   conns: () => RoomConn[]
-  save: (state: GameRoomState) => void
+  /** Must finish before a snapshot is sent. A dropped write is how a guess disappears. */
+  save: (state: GameRoomState) => void | Promise<void>
   /** Closes every socket, deletes storage and the alarm. */
   wipe: () => Promise<void>
-  /** `null` clears the alarm. */
-  setAlarm: (at: number | null) => void
+  /** `null` clears the alarm. Must finish before the handler returns. */
+  setAlarm: (at: number | null) => void | Promise<void>
   previewOptions: () => PreviewOptions
 }
 
@@ -93,7 +94,7 @@ export class RoomHost {
    * - No open sockets → mark every seated player away.
    * - Playing past `roundEndsAt` → reveal via `syncPhase`.
    */
-  wake(): void {
+  async wake(): Promise<void> {
     const state = this.state
     if (!state) return
     const now = this.platform.now()
@@ -113,10 +114,10 @@ export class RoomHost {
     }
     room = syncPhase(room, now)
     if (recentMsgIds === state.recentMsgIds && JSON.stringify(room) === JSON.stringify(state.room)) {
-      this.rearm()
+      await this.rearm()
       return
     }
-    this.commit({
+    await this.commit({
       ...state,
       room,
       recentMsgIds,
@@ -128,10 +129,10 @@ export class RoomHost {
    * First-time room creation (HTTP POST). Key must match the DO name (4-letter code).
    * @returns `409` if storage already has a room; `400` for validation errors.
    */
-  create(input: GameRoomInput, key: string): CreateResult {
+  async create(input: GameRoomInput, key: string): Promise<CreateResult> {
     if (this.state) return { ok: false, status: 409, message: 'That room code is already in use' }
     try {
-      this.commit(createInitialState(input, key, this.platform.now()))
+      await this.commit(createInitialState(input, key, this.platform.now()))
       return { ok: true }
     } catch (error) {
       if (error instanceof RoomInputError) return { ok: false, status: 400, message: error.message }
@@ -156,7 +157,7 @@ export class RoomHost {
    * Socket accepted (Rivet `onConnect`). Marks a seated player present and pushes snapshots.
    * Guests with `intent: join` are not seated until a wire `join` action runs.
    */
-  connect(conn: RoomConn): void {
+  async connect(conn: RoomConn): Promise<void> {
     const state = this.state
     if (!state) return
     const now = this.platform.now()
@@ -164,14 +165,14 @@ export class RoomHost {
     if (room.players.some((player) => player.id === conn.playerId)) {
       room = setConnected(room, conn.playerId, true, now)
     }
-    this.commit({ ...state, room, lastSeenAt: now })
+    await this.commit({ ...state, room, lastSeenAt: now })
     this.pushViews()
   }
 
   /**
    * Socket closed (Rivet `onDisconnect`). Same `playerId` on another `conn.id` keeps them "connected".
    */
-  disconnect(conn: RoomConn): void {
+  async disconnect(conn: RoomConn): Promise<void> {
     const state = this.state
     if (!state) return
     const stillThere = this.platform.conns().some((other) => other.id !== conn.id && other.playerId === conn.playerId)
@@ -181,7 +182,7 @@ export class RoomHost {
     if (room.players.some((player) => player.id === conn.playerId)) {
       room = setConnected(room, conn.playerId, false, now)
     }
-    this.commit({ ...state, room, lastSeenAt: now })
+    await this.commit({ ...state, room, lastSeenAt: now })
     this.pushViews()
   }
 
@@ -194,22 +195,22 @@ export class RoomHost {
     }
     switch (request.type) {
       case 'join':
-        this.join(conn, request.nickname)
+        await this.join(conn, request.nickname)
         return
       case 'configure':
-        this.configure(conn, request)
+        await this.configure(conn, request)
         return
       case 'start':
         await this.start(conn, request.msgId, request.avoidTrackIds)
         return
       case 'guess':
-        this.guess(conn, request.msgId, request.text)
+        await this.guess(conn, request.msgId, request.text)
         return
       case 'next':
-        this.next(conn, request.msgId, request.roundNumber)
+        await this.next(conn, request.msgId, request.roundNumber)
         return
       case 'restart':
-        this.restartGame(conn, request.msgId)
+        await this.restartGame(conn, request.msgId)
         return
       case 'leave':
         await this.leave(conn)
@@ -232,26 +233,26 @@ export class RoomHost {
     const now = this.platform.now()
     const room = state.room
     if (room.phase === 'playing' && room.roundEndsAt !== null && now >= room.roundEndsAt) {
-      this.commit({ ...state, room: syncPhase(room, now) })
+      await this.commit({ ...state, room: syncPhase(room, now) })
       this.pushViews()
     }
     const current = this.requireState()
     const awake = this.platform.conns().length > 0 || current.room.players.some((player) => player.connected)
     if (awake) {
       // Something is live: push the 6h idle window forward (Rivet `_reap` with awake=true).
-      this.commit({ ...current, lastSeenAt: now })
+      await this.commit({ ...current, lastSeenAt: now })
     } else if (now - idleSince(current) >= REAP_MS) {
       await this.destroy()
       return
     }
-    this.rearm()
+    await this.rearm()
   }
 
-  private join(conn: RoomConn, nickname: string): void {
+  private async join(conn: RoomConn, nickname: string): Promise<void> {
     const room = this.room()
     const now = this.platform.now()
     if (room.players.some((player) => player.id === conn.playerId)) {
-      this.setRoom(setConnected(room, conn.playerId, true, now))
+      await this.setRoom(setConnected(room, conn.playerId, true, now))
       this.pushViews()
       return
     }
@@ -265,11 +266,11 @@ export class RoomHost {
       this.fail(conn, joined.error)
       return
     }
-    this.setRoom(joined.room)
+    await this.setRoom(joined.room)
     this.pushViews()
   }
 
-  private configure(conn: RoomConn, request: Extract<WireRequest, { type: 'configure' }>): void {
+  private async configure(conn: RoomConn, request: Extract<WireRequest, { type: 'configure' }>): Promise<void> {
     const playerId = this.seated(conn)
     if (!playerId) return
     if (this.isDuplicate(playerId, request.msgId)) {
@@ -294,8 +295,8 @@ export class RoomHost {
       this.fail(conn, configured.error)
       return
     }
-    this.remember(playerId, request.msgId)
-    this.setRoom(configured.room)
+    await this.remember(playerId, request.msgId)
+    await this.setRoom(configured.room)
     this.pushViews()
   }
 
@@ -315,13 +316,13 @@ export class RoomHost {
       this.fail(conn, marked.error)
       return
     }
-    this.remember(playerId, msgId)
-    this.setRoom(marked.room)
+    await this.remember(playerId, msgId)
+    await this.setRoom(marked.room)
     this.pushViews()
 
     const playlist = getPlaylist(marked.room.playlistId)
     if (!playlist) {
-      this.abortStart(playerId, msgId)
+      await this.abortStart(playerId, msgId)
       this.fail(conn, 'Unknown playlist')
       return
     }
@@ -336,25 +337,25 @@ export class RoomHost {
       const pending = this.stateOrNull()?.room
       if (!pending?.starting) return
       if (songs.length === 0) {
-        this.abortStart(playerId, msgId)
+        await this.abortStart(playerId, msgId)
         this.fail(conn, 'No previews for that playlist')
         return
       }
       const begun = beginGame(pending, songs, this.platform.now(), guessGraceSeconds())
       if (!begun.ok) {
-        this.abortStart(playerId, msgId)
+        await this.abortStart(playerId, msgId)
         this.fail(conn, begun.error)
         return
       }
-      this.setRoom(begun.room)
+      await this.setRoom(begun.room)
       this.pushViews()
     } catch (error) {
-      if (this.stateOrNull()?.room.starting) this.abortStart(playerId, msgId)
+      if (this.stateOrNull()?.room.starting) await this.abortStart(playerId, msgId)
       this.fail(conn, error instanceof Error ? error.message : 'Could not load previews')
     }
   }
 
-  private guess(conn: RoomConn, msgId: string, text: string): void {
+  private async guess(conn: RoomConn, msgId: string, text: string): Promise<void> {
     const playerId = this.seated(conn)
     if (!playerId) return
     if (this.isDuplicate(playerId, msgId)) {
@@ -363,17 +364,17 @@ export class RoomHost {
     }
     const guessed = submitGuess(this.room(), playerId, text, this.platform.now())
     if (!guessed.ok) {
-      if (guessed.room) this.setRoom(guessed.room)
+      if (guessed.room) await this.setRoom(guessed.room)
       this.pushViews()
       this.fail(conn, guessed.error)
       return
     }
-    this.remember(playerId, msgId)
-    this.setRoom(guessed.room)
+    await this.remember(playerId, msgId)
+    await this.setRoom(guessed.room)
     this.pushViews()
   }
 
-  private next(conn: RoomConn, msgId: string, roundNumber: number): void {
+  private async next(conn: RoomConn, msgId: string, roundNumber: number): Promise<void> {
     const playerId = this.seated(conn)
     if (!playerId) return
     if (this.isDuplicate(playerId, msgId)) {
@@ -385,12 +386,12 @@ export class RoomHost {
       this.fail(conn, stepped.error)
       return
     }
-    this.remember(playerId, msgId)
-    this.setRoom(stepped.room)
+    await this.remember(playerId, msgId)
+    await this.setRoom(stepped.room)
     this.pushViews()
   }
 
-  private restartGame(conn: RoomConn, msgId: string): void {
+  private async restartGame(conn: RoomConn, msgId: string): Promise<void> {
     const playerId = this.seated(conn)
     if (!playerId) return
     if (this.isDuplicate(playerId, msgId)) {
@@ -402,8 +403,8 @@ export class RoomHost {
       this.fail(conn, restarted.error)
       return
     }
-    this.remember(playerId, msgId)
-    this.setRoom(restarted.room)
+    await this.remember(playerId, msgId)
+    await this.setRoom(restarted.room)
     this.pushViews()
   }
 
@@ -418,7 +419,7 @@ export class RoomHost {
       await this.destroy()
       return
     }
-    this.commit({ ...state, room: next, recentMsgIds: ids })
+    await this.commit({ ...state, room: next, recentMsgIds: ids })
     this.pushViews()
   }
 
@@ -428,12 +429,12 @@ export class RoomHost {
     await this.platform.wipe()
   }
 
-  private abortStart(playerId: string, msgId: string): void {
+  private async abortStart(playerId: string, msgId: string): Promise<void> {
     const state = this.stateOrNull()
     if (!state) return
     const holder = { state }
     forget(holder, playerId, msgId)
-    this.commit({ ...holder.state, room: abortStarting(state.room) })
+    await this.commit({ ...holder.state, room: abortStarting(state.room) })
     this.pushViews()
   }
 
@@ -450,18 +451,18 @@ export class RoomHost {
     return this.requireState().room
   }
 
-  private setRoom(room: Room): void {
-    this.commit({ ...this.requireState(), room })
+  private async setRoom(room: Room): Promise<void> {
+    await this.commit({ ...this.requireState(), room })
   }
 
   private isDuplicate(playerId: string, msgId: string): boolean {
     return duplicate({ state: this.requireState() }, playerId, msgId)
   }
 
-  private remember(playerId: string, msgId: string): void {
+  private async remember(playerId: string, msgId: string): Promise<void> {
     const holder = { state: this.requireState() }
     remember(holder, playerId, msgId)
-    this.commit(holder.state)
+    await this.commit(holder.state)
   }
 
   /** Returns this connection's player id when they have a seat; otherwise sends an error. */
@@ -473,18 +474,18 @@ export class RoomHost {
     return conn.playerId
   }
 
-  /** Persist, then schedule the next alarm if the deadline changed. */
-  private commit(state: GameRoomState): void {
+  /** Persist, then schedule the next alarm if the deadline changed. Snapshots wait for this. */
+  private async commit(state: GameRoomState): Promise<void> {
     this.state = state
-    this.platform.save(state)
-    this.rearm()
+    await this.platform.save(state)
+    await this.rearm()
   }
 
   /**
    * One alarm covers both round end and idle reap: fire at min(roundEndsAt, lastSeenAt + REAP_MS).
    * Skips `setAlarm` when the target is unchanged (alarm writes cost money on the free tier).
    */
-  private rearm(): void {
+  private async rearm(): Promise<void> {
     const state = this.state
     if (!state) return
     const reapAt = idleSince(state) + REAP_MS
@@ -493,15 +494,16 @@ export class RoomHost {
     const target = roundAt !== null ? Math.min(roundAt, reapAt) : reapAt
     if (target === this.armedAt) return
     this.armedAt = target
-    this.platform.setAlarm(target)
+    await this.platform.setAlarm(target)
   }
 
   /** Fan out per-player views (Rivet `pushViews` / `snapshot` events). */
   private pushViews(): void {
     const room = this.stateOrNull()?.room
     if (!room) return
+    const now = this.platform.now()
     for (const conn of this.platform.conns()) {
-      const view = toView(room, conn.playerId)
+      const view = toView(room, conn.playerId, now)
       if (!view) continue
       conn.send({ type: 'snapshot', playerId: conn.playerId, view })
     }
@@ -509,7 +511,7 @@ export class RoomHost {
 
   /** Duplicate `msgId`: resend current view to the caller only (idempotent retries). */
   private pushOne(conn: RoomConn): void {
-    const view = toView(this.room(), conn.playerId)
+    const view = toView(this.room(), conn.playerId, this.platform.now())
     if (!view) return
     conn.send({ type: 'snapshot', playerId: conn.playerId, view })
   }

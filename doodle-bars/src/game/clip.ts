@@ -21,3 +21,19 @@ export function clipStartSeconds(duration: number, clipSeconds: number): number 
   if (latest < HOOK_SKIP_SECONDS) return 0
   return Math.round(latest * 10) / 10
 }
+
+export type ClipPlayhead = {
+  from: number
+  target: number
+  finished: boolean
+}
+
+/** Where this browser should be in the file so every player hears the same moment. */
+export function clipPlayhead(duration: number, clipSeconds: number, elapsedSeconds: number): ClipPlayhead {
+  const from = clipStartSeconds(duration, clipSeconds)
+  const clip = clampClipSeconds(clipSeconds)
+  const elapsed = Number.isFinite(elapsedSeconds) ? Math.max(0, elapsedSeconds) : 0
+  if (elapsed >= clip) return { from, target: from + clip, finished: true }
+  const span = Number.isFinite(duration) && duration > 0 ? duration : from + clip
+  return { from, target: Math.min(from + elapsed, span), finished: false }
+}

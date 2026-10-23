@@ -411,6 +411,57 @@ test('a guest reload keeps the same nickname on the host scoreboard', async ({ b
   await guestContext.close()
 })
 
+test('three players hear the same moment and a guess shows up for everyone', async ({ browser }) => {
+  const hostContext = await browser.newContext()
+  const riyaContext = await browser.newContext()
+  const devContext = await browser.newContext()
+  const host = await hostContext.newPage()
+  const riya = await riyaContext.newPage()
+  const dev = await devContext.newPage()
+
+  await host.goto('/')
+  await host.getByTestId('nickname').fill('Aman')
+  await host.getByTestId('host-room').click()
+  const code = (await host.getByTestId('room-code').textContent())?.trim() ?? ''
+
+  await riya.goto(`/?code=${code}`)
+  await riya.getByTestId('nickname').fill('Riya')
+  await riya.getByTestId('join-room').click()
+  await dev.goto(`/?code=${code}`)
+  await dev.getByTestId('nickname').fill('Dev')
+  await dev.getByTestId('join-room').click()
+  await expect(host.getByTestId('scoreboard')).toContainText('Riya')
+  await expect(host.getByTestId('scoreboard')).toContainText('Dev')
+
+  await host.getByTestId('start-game').click()
+  const players = [host, riya, dev]
+  for (const page of players) {
+    await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+    await expect(page.getByTestId('clip-status')).toHaveText('playing')
+  }
+  const heard = await Promise.all(
+    players.map(async (page) => Number(await page.getByTestId('clip-status').getAttribute('data-at'))),
+  )
+  const spread = Math.max(...heard) - Math.min(...heard)
+  expect(spread).toBeLessThan(2)
+
+  await riya.getByTestId('guess-input').fill('nope')
+  await riya.getByTestId('guess-submit').click()
+  await expect(host.getByTestId('guess-chat')).toContainText('nope')
+  await expect(dev.getByTestId('guess-chat')).toContainText('nope')
+  await expect(host.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
+
+  await dev.getByTestId('guess-input').fill('Kesariya')
+  await dev.getByTestId('guess-submit').click()
+  for (const page of players) {
+    await expect(page.getByTestId('reveal-title')).toHaveText('Kesariya')
+  }
+
+  await hostContext.close()
+  await riyaContext.close()
+  await devContext.close()
+})
+
 async function guessTitle(page: Page, title: string) {
   await expect(page.getByTestId('phase')).toHaveAttribute('data-phase', 'playing')
   await page.getByTestId('guess-input').fill(title)

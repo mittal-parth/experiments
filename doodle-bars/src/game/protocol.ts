@@ -70,6 +70,10 @@ export type RoomView = {
   recap: RoundRecap[]
   lastGuess: GuessFeedback | null
   roundEndsAt: number | null
+  /** Server clock when this clip's window opened. Null outside a playing round. */
+  clipStartsAt: number | null
+  /** Server clock when this snapshot was built. Clients measure the clip from this, not their own clock. */
+  serverNow: number
   starting: boolean
 }
 

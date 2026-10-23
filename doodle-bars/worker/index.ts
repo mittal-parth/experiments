@@ -51,7 +51,7 @@ export class GameRoom extends DurableObject<Env> {
     void ctx.blockConcurrencyWhile(async () => {
       const saved = await ctx.storage.get<GameRoomState>(STATE_KEY)
       this.host = new RoomHost(this.platform(), saved ?? null)
-      this.host.wake()
+      await this.host.wake()
     })
   }
 
@@ -74,7 +74,7 @@ export class GameRoom extends DurableObject<Env> {
       } catch {
         return json({ error: 'Bad request' }, 400)
       }
-      const created = this.host.create(input, code)
+      const created = await this.host.create(input, code)
       if (!created.ok) return json({ error: created.message }, created.status)
       return json({ ok: true }, 201)
     }
@@ -99,7 +99,7 @@ export class GameRoom extends DurableObject<Env> {
     if (!conn) return json({ error: 'Bad request' }, 400)
     // admit = onBeforeConnect; connect = onConnect + initial snapshots.
     if (this.host.admit(conn, params)) {
-      this.host.connect(conn)
+      await this.host.connect(conn)
     } else {
       server.close(1000, 'room not available')
     }
@@ -123,14 +123,14 @@ export class GameRoom extends DurableObject<Env> {
     }
   }
 
-  webSocketClose(ws: WebSocket): void {
+  async webSocketClose(ws: WebSocket): Promise<void> {
     const conn = toConn(ws)
-    if (conn) this.host.disconnect(conn)
+    if (conn) await this.host.disconnect(conn)
   }
 
-  webSocketError(ws: WebSocket): void {
+  async webSocketError(ws: WebSocket): Promise<void> {
     const conn = toConn(ws)
-    if (conn) this.host.disconnect(conn)
+    if (conn) await this.host.disconnect(conn)
   }
 
   /** DO alarm handler; round reveal and idle reap are multiplexed in `RoomHost.alarm`. */
@@ -147,9 +147,7 @@ export class GameRoom extends DurableObject<Env> {
           .getWebSockets()
           .flatMap((ws) => (ws.readyState === SOCKET_OPEN ? [toConn(ws)] : []))
           .filter(isConn),
-      save: (state) => {
-        void this.ctx.storage.put(STATE_KEY, state)
-      },
+      save: (state) => this.ctx.storage.put(STATE_KEY, state),
       wipe: async () => {
         for (const ws of this.ctx.getWebSockets()) {
           try {
@@ -161,10 +159,7 @@ export class GameRoom extends DurableObject<Env> {
         await this.ctx.storage.deleteAlarm()
         await this.ctx.storage.deleteAll()
       },
-      setAlarm: (at) => {
-        if (at === null) void this.ctx.storage.deleteAlarm()
-        else void this.ctx.storage.setAlarm(at)
-      },
+      setAlarm: (at) => (at === null ? this.ctx.storage.deleteAlarm() : this.ctx.storage.setAlarm(at)),
       previewOptions: () => ({
         mode: this.env.SONG_PREVIEW_MODE === 'fixture' ? 'fixture' : 'live',
         order: this.env.SONG_ORDER === 'catalog' ? 'catalog' : 'shuffle',
