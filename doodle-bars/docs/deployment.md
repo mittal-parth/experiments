@@ -12,9 +12,18 @@ npx wrangler login
 npm run deploy:worker
 ```
 
-`wrangler deploy` publishes `worker/index.ts` and applies the migration in `wrangler.jsonc` that creates the SQLite-backed `GameRoom` class. It prints a URL like `https://doodle-bars-rooms.<account>.workers.dev`. A custom domain is optional.
+`wrangler deploy` publishes `worker/index.ts` and applies the migration in `wrangler.jsonc` that creates the SQLite-backed `GameRoom` class. The live URL is `https://doodle-bars-rooms.songguesser.workers.dev`. A custom domain is optional.
 
-To deploy from CI or an agent, set `CLOUDFLARE_API_TOKEN` (the "Edit Cloudflare Workers" template) and `CLOUDFLARE_ACCOUNT_ID`, then run `npm run deploy:worker`. Workers Builds (connect the repo in the Cloudflare dashboard) also works.
+A merge to `main` that changes the room worker deploys it. The workflow is [`.github/workflows/deploy-doodle-bars-worker.yml`](../../.github/workflows/deploy-doodle-bars-worker.yml). It runs `wrangler deploy` in `doodle-bars` and leaves the Vercel site alone. A site-only change does not restart rooms. A worker deploy still drops open sockets; clients reconnect and retry the last command.
+
+One time, add these [Actions secrets](https://github.com/mittal-parth/experiments/settings/secrets/actions):
+
+| Secret | Value |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | API token from the "Edit Cloudflare Workers" template, scoped to this account. [Create a token](https://dash.cloudflare.com/profile/api-tokens). |
+| `CLOUDFLARE_ACCOUNT_ID` | Account id from the dashboard URL (`dash.cloudflare.com/<account id>/`). |
+
+The workflow has to be on `main` before it runs. Until those secrets exist, the job fails at authentication and does not publish. You can also run it by hand from the Actions tab.
 
 Settings are `vars` in `wrangler.jsonc`:
 
