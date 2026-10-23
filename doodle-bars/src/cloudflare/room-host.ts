@@ -63,6 +63,12 @@ export type RoomPlatform = {
   /** `null` clears the alarm. Must finish before the handler returns. */
   setAlarm: (at: number | null) => void | Promise<void>
   previewOptions: () => PreviewOptions
+  /**
+   * Guessing time after the clip. The Worker passes its `GUESS_GRACE_SECONDS` var.
+   * Omitted in tests, which set `process.env.GUESS_GRACE_SECONDS` instead.
+   * A Worker var is not copied into `process.env` unless `nodejs_compat_populate_process_env` is on.
+   */
+  graceSeconds?: () => number
 }
 
 export type CreateResult = { ok: true } | { ok: false; status: 400 | 409; message: string }
@@ -295,8 +301,7 @@ export class RoomHost {
       this.fail(conn, configured.error)
       return
     }
-    await this.remember(playerId, request.msgId)
-    await this.setRoom(configured.room)
+    await this.apply(playerId, request.msgId, configured.room)
     this.pushViews()
   }
 
@@ -316,8 +321,7 @@ export class RoomHost {
       this.fail(conn, marked.error)
       return
     }
-    await this.remember(playerId, msgId)
-    await this.setRoom(marked.room)
+    await this.apply(playerId, msgId, marked.room)
     this.pushViews()
 
     const playlist = getPlaylist(marked.room.playlistId)
@@ -341,7 +345,7 @@ export class RoomHost {
         this.fail(conn, 'No previews for that playlist')
         return
       }
-      const begun = beginGame(pending, songs, this.platform.now(), guessGraceSeconds())
+      const begun = beginGame(pending, songs, this.platform.now(), this.grace())
       if (!begun.ok) {
         await this.abortStart(playerId, msgId)
         this.fail(conn, begun.error)
@@ -364,13 +368,16 @@ export class RoomHost {
     }
     const guessed = submitGuess(this.room(), playerId, text, this.platform.now())
     if (!guessed.ok) {
-      if (guessed.room) await this.setRoom(guessed.room)
-      this.pushViews()
+      if (guessed.room) {
+        // The deadline already moved the room to the reveal. The snapshot is the answer.
+        await this.apply(playerId, msgId, guessed.room)
+        this.pushViews()
+        return
+      }
       this.fail(conn, guessed.error)
       return
     }
-    await this.remember(playerId, msgId)
-    await this.setRoom(guessed.room)
+    await this.apply(playerId, msgId, guessed.room)
     this.pushViews()
   }
 
@@ -381,13 +388,12 @@ export class RoomHost {
       this.pushOne(conn)
       return
     }
-    const stepped = advance(this.room(), playerId, this.platform.now(), guessGraceSeconds(), roundNumber)
+    const stepped = advance(this.room(), playerId, this.platform.now(), this.grace(), roundNumber)
     if (!stepped.ok) {
       this.fail(conn, stepped.error)
       return
     }
-    await this.remember(playerId, msgId)
-    await this.setRoom(stepped.room)
+    await this.apply(playerId, msgId, stepped.room)
     this.pushViews()
   }
 
@@ -403,8 +409,7 @@ export class RoomHost {
       this.fail(conn, restarted.error)
       return
     }
-    await this.remember(playerId, msgId)
-    await this.setRoom(restarted.room)
+    await this.apply(playerId, msgId, restarted.room)
     this.pushViews()
   }
 
@@ -459,10 +464,15 @@ export class RoomHost {
     return duplicate({ state: this.requireState() }, playerId, msgId)
   }
 
-  private async remember(playerId: string, msgId: string): Promise<void> {
-    const holder = { state: this.requireState() }
+  /** One save for the room and its `msgId`, so a retry cannot land between the two. */
+  private async apply(playerId: string, msgId: string, room: Room): Promise<void> {
+    const holder = { state: { ...this.requireState(), room } }
     remember(holder, playerId, msgId)
     await this.commit(holder.state)
+  }
+
+  private grace(): number {
+    return this.platform.graceSeconds?.() ?? guessGraceSeconds()
   }
 
   /** Returns this connection's player id when they have a seat; otherwise sends an error. */

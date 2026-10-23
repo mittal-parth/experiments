@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { makeCode, makeId } from '@/game/ids'
 import type { RoomView, ServerMessage } from '@/game/protocol'
 import { REAP_MS, type ConnParams, type GameRoomInput, type GameRoomState } from '@/game/room-service'
+import { guessGraceSeconds } from '@/game/score'
 import { MISSING_ROOM } from '@/rivet/errors'
 import { clearPreviewCache } from '@/server/previews'
 import { RoomHost, type RoomConn, type RoomPlatform } from './room-host'
@@ -25,6 +26,7 @@ function makeRuntime(saved: GameRoomState | null = null, previewOptions: RoomPla
     alarm: null as number | null,
     alarmWrites: 0,
     wiped: false,
+    grace: null as number | null,
     saveGate: null as null | (() => void | Promise<void>),
     host: null as unknown as RoomHost,
   }
@@ -45,6 +47,7 @@ function makeRuntime(saved: GameRoomState | null = null, previewOptions: RoomPla
       runtime.alarm = at
       runtime.alarmWrites += 1
     },
+    graceSeconds: () => runtime.grace ?? guessGraceSeconds(),
     previewOptions,
   }
   runtime.host = new RoomHost(platform, saved)
@@ -246,6 +249,13 @@ it('ignores an alarm that fires before the deadline and arms it again', async ()
   expect(runtime.alarm).toBe(endsAt)
 })
 
+it('times the round from the platform grace', async () => {
+  const { runtime, conn } = await hosted({ clipSeconds: 1 })
+  runtime.grace = 3
+  await send(runtime, conn, { type: 'start', msgId: makeId(), avoidTrackIds: [] })
+  expect(runtime.saved?.room.roundEndsAt).toBe(T0 + 4_000)
+})
+
 it('does not rewrite the alarm for a guess', async () => {
   const { runtime, conn } = await hosted()
   await send(runtime, conn, { type: 'start', msgId: makeId(), avoidTrackIds: [] })
@@ -343,12 +353,10 @@ it('publishes a guess only after the save finishes', async () => {
       gates.push(() => resolve())
     })
   const pending = send(runtime, conn, { type: 'guess', msgId: makeId(), text: 'nope' })
-  await vi.waitFor(() => expect(gates.length).toBeGreaterThan(0))
+  await vi.waitFor(() => expect(gates.length).toBe(1))
+  expect(runtime.saved?.room.guesses).toHaveLength(1)
   expect(lastView(conn).guesses).toHaveLength(0)
   gates[0]?.()
-  await vi.waitFor(() => expect(runtime.saved?.room.guesses).toHaveLength(1))
-  expect(lastView(conn).guesses).toHaveLength(0)
-  gates.at(-1)?.()
   await pending
   expect(lastView(conn).guesses).toHaveLength(1)
 })

@@ -269,7 +269,13 @@ export function useRoom() {
         const command = lastCommand.current
         if (command && !replayed.current) {
           replayed.current = true
-          void runReplay(conn, command).catch(() => {})
+          void runReplay(conn, command).catch(() => {
+            if (connRef.current !== conn) return
+            replayed.current = false
+            connRef.current = null
+            void conn.dispose()
+            scheduleReconnectRef.current()
+          })
         }
       }
     })

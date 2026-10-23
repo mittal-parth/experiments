@@ -11,8 +11,9 @@ import { DurableObject } from 'cloudflare:workers'
 import { RoomHost, type RoomConn, type RoomPlatform } from '@/cloudflare/room-host'
 import { parseWireRequest } from '@/cloudflare/wire'
 import { cleanCode } from '@/game/names'
-import { MISSING_ROOM } from '@/rivet/errors'
 import { readConnParams, type GameRoomInput, type GameRoomState } from '@/game/room-service'
+import { graceSecondsFrom } from '@/game/score'
+import { MISSING_ROOM } from '@/rivet/errors'
 
 type Env = {
   GAME_ROOM: DurableObjectNamespace<GameRoom>
@@ -179,6 +180,8 @@ export class GameRoom extends DurableObject<Env> {
         await this.ctx.storage.deleteAll()
       },
       setAlarm: (at) => (at === null ? this.ctx.storage.deleteAlarm() : this.ctx.storage.setAlarm(at)),
+      // Bindings live on `env`. `process.env` does not see them on this compatibility date.
+      graceSeconds: () => graceSecondsFrom(this.env.GUESS_GRACE_SECONDS),
       previewOptions: () => ({
         mode: this.env.SONG_PREVIEW_MODE === 'fixture' ? 'fixture' : 'live',
         order: this.env.SONG_ORDER === 'catalog' ? 'catalog' : 'shuffle',
