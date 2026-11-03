@@ -1,0 +1,28 @@
+// Routes are far apart on purpose: a festival to a physics article, a snack to a
+// space station. Preflight drops any pair whose target is already one click away.
+export const CANDIDATES = [
+  { id: "chai-philosophy", start: "चाय", target: "दर्शनशास्त्र", blurb: "The classic race, in Hindi" },
+  { id: "cricket-taj", start: "क्रिकेट", target: "ताजमहल", blurb: "A sport to a monument" },
+  { id: "yoga-mars", start: "योग", target: "मंगल", blurb: "A practice to a planet" },
+  { id: "mumbai-himalaya", start: "मुम्बई", target: "हिमालय", blurb: "The coast to the mountains" },
+  { id: "holi-quantum", start: "होली", target: "प्रमात्रा यान्त्रिकी", blurb: "A festival to quantum mechanics" },
+  { id: "srk-everest", start: "शाहरुख़ ख़ान", target: "एवरेस्ट पर्वत", blurb: "A star to a summit" },
+  { id: "ganga-computer", start: "गंगा नदी", target: "संगणक", blurb: "A river to a computer" },
+  { id: "diwali-math", start: "दीपावली", target: "गणित", blurb: "A festival of lights to mathematics" },
+  { id: "tagore-ai", start: "रबीन्द्रनाथ ठाकुर", target: "कृत्रिम बुद्धि", blurb: "A poet to artificial intelligence" },
+  { id: "cinema-physics", start: "हिन्दी सिनेमा", target: "भौतिक शास्त्र", blurb: "Hindi cinema to physics" },
+  { id: "samosa-iss", start: "समोसा", target: "अन्तर्राष्ट्रीय अन्तरिक्ष स्टेशन", blurb: "A snack to the space station" },
+  { id: "kabir-dna", start: "कबीर", target: "डीऑक्सीराइबो न्यूक्लिक अम्ल", blurb: "A poet to a molecule" },
+  { id: "sitar-blackhole", start: "सितार", target: "कृष्ण विवर", blurb: "An instrument to a black hole" },
+  { id: "panchatantra-internet", start: "पंचतंत्र", target: "अंतरजाल", blurb: "Fables to the internet" },
+  { id: "ayurveda-chandrayaan", start: "आयुर्वेद", target: "चन्द्रयान", blurb: "Medicine to a moon mission" },
+  { id: "lata-einstein", start: "लता मंगेशकर", target: "अल्बर्ट आइंस्टीन", blurb: "A voice to a physicist" },
+  { id: "harmandir-solar", start: "हरिमन्दिर साहिब", target: "सौर मण्डल", blurb: "A temple to the solar system" },
+  { id: "kathak-whitehouse", start: "कथक", target: "व्हाइट हाउस", blurb: "A dance to the White House" },
+  { id: "tabla-bigben", start: "तबला", target: "बिग बेन", blurb: "A drum to a clock" },
+  { id: "qutub-blackhole", start: "क़ुतुब मीनार", target: "कृष्ण विवर", blurb: "A tower to a black hole" },
+  { id: "ipl-philosophy", start: "इंडियन प्रीमियर लीग", target: "दर्शनशास्त्र", blurb: "A league to philosophy" },
+  { id: "meghaduta-chandrayaan", start: "मेघदूतम्", target: "चन्द्रयान", blurb: "A poem to a moon mission" },
+  { id: "sachin-himalaya", start: "सचिन तेंदुलकर", target: "हिमालय", blurb: "A batter to the Himalaya" },
+  { id: "goa-quantum", start: "गोवा", target: "प्रमात्रा यान्त्रिकी", blurb: "A coast to quantum mechanics" },
+];

@@ -1,0 +1,14 @@
+{
+  "name": "hindi-wiki-race",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "race": "node src/run.js",
+    "preflight": "node src/run.js --preflight",
+    "test": "node --test"
+  }
+}

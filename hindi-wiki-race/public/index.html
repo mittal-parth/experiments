@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hindi Wikipedia race · Prism vs Jev</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-phase="loading">
+    <header class="top">
+      <div class="title-block">
+        <p class="eyebrow">Hindi Wikipedia</p>
+        <h1>Prism vs Jev</h1>
+      </div>
+      <p id="route-count" class="route-count">Split-screen race</p>
+      <p id="tally" class="tally">Prism 0 · Ties 0 · Jev 0</p>
+    </header>
+    <main id="stage">
+      <section id="lanes" class="lanes">
+        <article class="lane prism" id="lane-prism">
+          <header class="lane-head">
+            <div>
+              <p class="brand">Sarvam Prism</p>
+              <p class="brand-sub">Indian-language decision model</p>
+            </div>
+            <dl class="meters" id="meters-prism"></dl>
+          </header>
+          <p class="kicker">Now reading</p>
+          <h2 class="hi" id="title-prism">—</h2>
+          <ol class="path hi" id="path-prism"></ol>
+          <div class="decision" id="decision-prism"></div>
+          <p class="stamp" id="stamp-prism" hidden></p>
+        </article>
+        <aside class="spine" id="spine">
+          <p class="kicker" id="race-kicker">Race</p>
+          <h2 class="hi spine-titles" id="spine-titles"></h2>
+          <p class="blurb" id="spine-blurb"></p>
+          <p class="verdict" id="verdict"></p>
+          <button id="go" type="button">Start the race</button>
+          <p class="hint" id="hint"></p>
+        </aside>
+        <article class="lane jev" id="lane-jev">
+          <header class="lane-head">
+            <div>
+              <p class="brand">Jev</p>
+              <p class="brand-sub">TypeSafe decision model</p>
+            </div>
+            <dl class="meters" id="meters-jev"></dl>
+          </header>
+          <p class="kicker">Now reading</p>
+          <h2 class="hi" id="title-jev">—</h2>
+          <ol class="path hi" id="path-jev"></ol>
+          <div class="decision" id="decision-jev"></div>
+          <p class="stamp" id="stamp-jev" hidden></p>
+        </article>
+      </section>
+      <section id="board" class="board" hidden>
+        <p id="lead" class="lead"></p>
+        <div id="stats" class="stats"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th></th>
+                <th>Route</th>
+                <th>Prism steps</th>
+                <th>Jev steps</th>
+                <th>Prism time</th>
+                <th>Jev time</th>
+                <th>Prism cost</th>
+                <th>Jev cost</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <p id="footnote" class="footnote"></p>
+        <p id="ready-flag" class="ready-flag" hidden>Comparison ready</p>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
